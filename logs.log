@@ -1,0 +1,1 @@
+{"timestamp":"2024-07-27T00:25:23.881251Z","level":"INFO","fields":{"message":"Tracing set up."},"filename":"src/logger.rs","line_number":32,"threadId":"ThreadId(1)"}
