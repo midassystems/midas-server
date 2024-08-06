@@ -1,0 +1,58 @@
+
+services:
+  app: 
+    build:
+      context: .
+      dockerfile: "./Dockerfile"
+    environment:
+      MARKET_DATABASE_URL: postgres://postgres:password@postgres_db:5432/market_data
+      TRADING_DATABASE_URL: postgres://postgres:password@postgres_db:5432/trading_data
+      LOG_FILE: /app/logs/system.log
+    depends_on:
+      - postgres_db
+    ports:
+      - "8080:8080"  # Expose the app port to the host
+    command: ["./midasbackend"]
+
+  # Application service for market data
+  market_data:
+    build:
+      context: .  # Include the entire project as context
+      dockerfile: ./databases/market/Dockerfile
+    environment:
+      MARKET_DATABASE_URL: postgres://postgres:password@postgres_db:5432/market_data
+    ports:
+      - "5434:5432"  # Host Port : Container Port for market_data
+    depends_on:
+      - postgres_db  # Wait for the database to be ready
+    command: ["./migrate.sh", "market"]
+
+  # Application service for trading data
+  trading_data:
+    build:
+      context: .  # Include the entire project as context
+      dockerfile: ./databases/trading/Dockerfile
+    environment:
+      TRADING_DATABASE_URL: postgres://postgres:password@postgres_db:5432/trading_data
+    ports:
+      - "5435:5432"  # Host Port : Container Port for trading_data
+    depends_on:
+      - postgres_db  # Wait for the database to be ready
+    command: ["./migrate.sh", "trading"]
+
+  # Single PostgreSQL service hosting both databases
+  postgres_db:
+    image: postgres:14
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh
+
+volumes:
+  postgres_data:
+
+

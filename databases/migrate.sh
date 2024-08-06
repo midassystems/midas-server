@@ -16,18 +16,17 @@ if [ "$#" -lt 1 ]; then
 fi
 
 DATABASE=$1
-# MIGRATION_FILE=$2
 
 if [ "$DATABASE" == "trading" ]; then
-    echo "POSTGRES DATABASE_URL: $TRADING_DATABASE_URL"
-    cd databases/trading
+    echo "TRADING_DATABASE_URL: $TRADING_DATABASE_URL"
+    cd trading
     DATABASE_URL=$TRADING_DATABASE_URL sqlx migrate run
-    cd ../..
+    echo "Trading_data database migrated."
 elif [ "$DATABASE" == "market" ]; then
     echo "MARKET_DATABASE_URL: $MARKET_DATABASE_URL"
-    cd databases/market
+    cd market
     DATABASE_URL=$MARKET_DATABASE_URL sqlx migrate run
-    cd ../..
+    echo "Market_data database migrated."
 else
     echo "Unknown database: $DATABASE"
     exit 1
