@@ -1,0 +1,35 @@
+# Use the official PostgreSQL image as a base
+FROM postgres:14
+
+# Install necessary packages for running Rust and SQLx CLI
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  curl \
+  build-essential \
+  libssl-dev \
+  libpq-dev \
+  pkg-config \
+  ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
+
+# Add cargo bin to PATH
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install sqlx-cli with the locked flag for version consistency
+RUN /bin/bash -c "source $HOME/.cargo/env && cargo install sqlx-cli --locked"
+
+# Set the working directory
+WORKDIR /app
+
+# Copy the migration script and migrations directory
+COPY databases/migrate.sh /app/migrate.sh
+COPY databases/market /app/market
+
+# Ensure scripts are executable
+RUN chmod +x /app/migrate.sh 
+
+# Run the wait-for script and then execute migrations
+CMD ["./migrate.sh", "market"]
+

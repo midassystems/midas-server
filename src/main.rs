@@ -25,7 +25,10 @@ async fn main() -> Result<()> {
     let app = router(pg_pool, quest_pool);
 
     // Define the address to bind to
-    let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
+    // let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
+    // let port: u32 = std::env::var("PORT")?;
+    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
+
     println!("Listening on {}", addr);
 
     // Run the server
