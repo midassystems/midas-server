@@ -1,0 +1,28 @@
+setup:
+  addons:
+    - plan: heroku-postgresql:hobby-dev
+      as: DATABASE
+
+build:
+  docker:
+    app: 
+      dockerfile: Dockerfile
+    market_data:
+      dockerfile: ./databases/market/Dockerfile
+    trading_data:
+      dockerfile: ./databases/trading/Dockerfile
+
+run:
+  web:
+    command: ["./midasbackend"]
+    processes:
+      app:
+        command: ["./midasbackend"]
+        depends_on:
+          - market_data
+          - trading_data
+      market_data:
+        command: ["./migrate.sh", "market"]
+      trading_data:
+        command: ["./migrate.sh", "trading"]
+
