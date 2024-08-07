@@ -7,6 +7,9 @@ WORKDIR /app
 # Copy the Cargo.toml and Cargo.lock files
 COPY Cargo.toml Cargo.lock ./
 
+# Pre-fetch the dependencies to leverage Docker's cache
+RUN cargo fetch
+
 # Copy the source code
 COPY src ./src
 

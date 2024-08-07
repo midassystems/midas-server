@@ -1,5 +1,4 @@
 use crate::database::market_data::{RecordInsertQueries, RecordRetrieveQueries, RetrieveParams};
-use crate::mbn::encode::RecordEncoder;
 use crate::mbn::record_enum::RecordEnum;
 use crate::mbn::record_ref::RecordRef;
 use crate::response::ApiResponse;
@@ -7,11 +6,10 @@ use crate::Result;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
-use mbn::decode::{CombinedDecoder, RecordDecoder};
+use mbn::decode::RecordDecoder;
 use mbn::encode::CombinedEncoder;
 use mbn::enums::Schema;
 use mbn::metadata::Metadata;
-use mbn::symbols::SymbolMap;
 use sqlx::PgPool;
 use std::io::Cursor;
 use std::str::FromStr;
@@ -99,11 +97,13 @@ mod test {
     use super::*;
     use crate::database::init::init_quest_db;
     use crate::database::symbols::InstrumentsQueries;
+    use crate::mbn::encode::RecordEncoder;
     use crate::mbn::{
         enums::Schema,
         records::{BidAskPair, Mbp1Msg, RecordHeader},
         symbols::Instrument,
     };
+
     use serial_test::serial;
 
     #[sqlx::test]

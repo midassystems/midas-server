@@ -1,6 +1,26 @@
-**/target
-**/*.rs.bk
-**/*.rs.swp
-.env
+# Ignore the target directory
+target/
+
+# Ignore version control folders
 .git
 .gitignore
+
+# Ignore editor and system files
+*.DS_Store
+.idea/
+.vscode/
+*.iml
+
+# Ignore temporary files and logs
+**/*.log
+**/*.tmp
+**/*.bak
+
+# Ignore node_modules if applicable
+node_modules/
+
+# Ignore test and CI directories if not needed in the container
+tests/
+.ci/
+
+

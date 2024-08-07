@@ -7,10 +7,8 @@ use mbn::records::{BidAskPair, OhlcvMsg};
 use mbn::symbols::SymbolMap;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Postgres, Row, Transaction};
-use std::collections::hash_map::HashMap;
-use std::hash;
+use std::os::raw::c_char;
 use std::str::FromStr;
-use std::{ffi::CStr, mem, os::raw::c_char, ptr::NonNull, slice};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RetrieveParams {
