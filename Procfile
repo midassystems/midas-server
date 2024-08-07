@@ -1,3 +1,0 @@
-web: ./target/release/midasbackend
-
-

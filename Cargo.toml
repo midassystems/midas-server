@@ -37,4 +37,7 @@ regex = "1.3.9"
 
 
 
-
+# Specify a binary target
+[[bin]]
+name = "midasbackend"
+path = "src/main.rs"

@@ -24,10 +24,6 @@ pub fn router(pg_pool: PgPool, quest_pool: PgPool) -> Router {
                     "/mbp",
                     market_data_service().layer(Extension(quest_pool.clone())),
                 ),
-            // Router::new()
-            //     .nest("/instruments", instrument_service())
-            //     .nest("/mbp", market_data_service())
-            //     .layer(Extension(quest_pool)),
         )
         .nest(
             "/trading",
