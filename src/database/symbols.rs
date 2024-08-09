@@ -3,6 +3,24 @@ use crate::Result;
 use async_trait::async_trait;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
+struct InstrumentWrapper(Instrument);
+
+impl sqlx::FromRow<'_, sqlx::postgres::PgRow> for InstrumentWrapper {
+    fn from_row(row: &sqlx::postgres::PgRow) -> std::result::Result<Self, sqlx::Error> {
+        Ok(InstrumentWrapper(Instrument {
+            ticker: row.try_get::<String, _>("ticker")?,
+            name: row.try_get::<String, _>("name")?,
+            instrument_id: row.try_get::<Option<i32>, _>("id")?.map(|id| id as u32),
+        }))
+    }
+}
+
+impl From<InstrumentWrapper> for Instrument {
+    fn from(wrapper: InstrumentWrapper) -> Self {
+        wrapper.0
+    }
+}
+
 #[async_trait]
 pub trait InstrumentsQueries: Sized {
     async fn insert_instrument(&self, tx: &mut Transaction<'_, Postgres>) -> Result<i32>;
@@ -53,15 +71,17 @@ impl InstrumentsQueries for Instrument {
     }
 
     async fn list_instruments(pool: &PgPool) -> Result<Vec<Instrument>> {
-        let result: Vec<Instrument> = sqlx::query_as(
+        let rows: Vec<InstrumentWrapper> = sqlx::query_as(
             r#"
-            SELECT * FROM instrument;
+            SELECT * FROM instrument
             "#,
         )
         .fetch_all(pool)
         .await?;
 
-        Ok(result)
+        let instruments: Vec<Instrument> = rows.into_iter().map(Instrument::from).collect();
+
+        Ok(instruments)
     }
 
     async fn delete_instrument(tx: &mut Transaction<'_, Postgres>, id: i32) -> Result<()> {
@@ -126,7 +146,7 @@ mod test {
 
         let ticker = "AAPL";
         let name = "Apple Inc.";
-        let instrument = Instrument::new(ticker, name);
+        let instrument = Instrument::new(ticker, name, None);
 
         // Test
         let result = instrument
@@ -147,7 +167,7 @@ mod test {
 
         let ticker = "AAPL";
         let name = "Apple Inc.";
-        let instrument = Instrument::new(ticker, name);
+        let instrument = Instrument::new(ticker, name, None);
         let id = instrument
             .insert_instrument(&mut transaction)
             .await
@@ -183,7 +203,7 @@ mod test {
 
         let ticker = "AAPL";
         let name = "Apple Inc.";
-        let instrument = Instrument::new(ticker, name);
+        let instrument = Instrument::new(ticker, name, None);
         let id = instrument
             .insert_instrument(&mut transaction)
             .await
@@ -193,7 +213,7 @@ mod test {
         // Test
         let new_ticker = "TSLA";
         let new_name = "Tesla Inc.";
-        let new_instrument = Instrument::new(new_ticker, new_name);
+        let new_instrument = Instrument::new(new_ticker, new_name, None);
         let mut transaction = pool.begin().await.expect("Error settign up database.");
         let result = new_instrument
             .update_instrument(&mut transaction, id)
@@ -227,7 +247,7 @@ mod test {
 
         let ticker = "AAPL";
         let name = "Apple Inc.";
-        let instrument = Instrument::new(ticker, name);
+        let instrument = Instrument::new(ticker, name, None);
         let id = instrument
             .insert_instrument(&mut transaction)
             .await
@@ -236,7 +256,7 @@ mod test {
 
         let ticker = "TSLA";
         let name = "Tesle Inc.";
-        let instrument = Instrument::new(ticker, name);
+        let instrument = Instrument::new(ticker, name, None);
         let id2 = instrument
             .insert_instrument(&mut transaction)
             .await
@@ -279,7 +299,7 @@ mod test {
 
         let ticker = "AAPL";
         let name = "Apple Inc.";
-        let instrument = Instrument::new(ticker, name);
+        let instrument = Instrument::new(ticker, name, None);
         let id = instrument
             .insert_instrument(&mut transaction)
             .await
@@ -288,7 +308,7 @@ mod test {
 
         let ticker2 = "TSLA";
         let name = "Tesle Inc.";
-        let instrument = Instrument::new(ticker2, name);
+        let instrument = Instrument::new(ticker2, name, None);
         let id2 = instrument
             .insert_instrument(&mut transaction)
             .await

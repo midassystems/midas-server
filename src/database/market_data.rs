@@ -326,7 +326,7 @@ mod test {
 
         let ticker = "AAPL";
         let name = "Apple Inc.";
-        let instrument = Instrument::new(ticker, name);
+        let instrument = Instrument::new(ticker, name, None);
         let id = instrument
             .insert_instrument(&mut transaction)
             .await

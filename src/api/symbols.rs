@@ -126,7 +126,7 @@ mod test {
         dotenv::dotenv().ok();
         let pool = init_quest_db().await.unwrap();
 
-        let instrument = Instrument::new("AAPL", "Apple Inc.");
+        let instrument = Instrument::new("AAPL", "Apple Inc.", None);
 
         // Test
         let result = create_instrument(Extension(pool.clone()), Json(instrument))
@@ -158,7 +158,7 @@ mod test {
 
         let ticker = "AAPL";
         let name = "Apple Inc.";
-        let instrument = Instrument::new(ticker, name);
+        let instrument = Instrument::new(ticker, name, None);
         let id = instrument
             .insert_instrument(&mut transaction)
             .await
@@ -167,7 +167,7 @@ mod test {
 
         let ticker = "TSLA";
         let name = "Tesle Inc.";
-        let instrument = Instrument::new(ticker, name);
+        let instrument = Instrument::new(ticker, name, None);
         let id2 = instrument
             .insert_instrument(&mut transaction)
             .await
@@ -207,7 +207,7 @@ mod test {
         // Create Instrument
         let ticker = "AAPL";
         let name = "Apple Inc.";
-        let instrument = Instrument::new(ticker, name);
+        let instrument = Instrument::new(ticker, name, None);
         let id = instrument
             .insert_instrument(&mut transaction)
             .await
@@ -217,7 +217,7 @@ mod test {
         // Test
         let new_ticker = "TSLA";
         let new_name = "Tesla Inc.";
-        let new_instrument = Instrument::new(new_ticker, new_name);
+        let new_instrument = Instrument::new(new_ticker, new_name, None);
 
         let result = update_instrument_id(Extension(pool.clone()), Json((new_instrument, id)))
             .await
