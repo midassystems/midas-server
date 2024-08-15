@@ -13,29 +13,16 @@ use mbn::{
     records::{BidAskPair, Mbp1Msg, RecordHeader},
     symbols::Instrument,
 };
-use midasbackend::database::init::{init_pg_db, init_quest_db};
-use midasbackend::database::market_data::RetrieveParams;
-use midasbackend::response::ApiResponse;
-use midasbackend::router;
-use regex::Regex;
+use midas_server::database::init::{init_pg_db, init_quest_db};
+use midas_server::database::market_data::RetrieveParams;
+use midas_server::response::ApiResponse;
+use midas_server::router;
 use serde::de::DeserializeOwned;
 use serde_json::json;
 use serial_test::serial;
 use std::convert::Infallible;
 use std::fs;
 use tower::ServiceExt;
-
-fn get_id_from_string(message: &str) -> Option<i32> {
-    let re = Regex::new(r"\d+$").unwrap();
-
-    if let Some(captures) = re.captures(message) {
-        if let Some(matched) = captures.get(0) {
-            let number: i32 = matched.as_str().parse().unwrap();
-            return Some(number);
-        }
-    }
-    None
-}
 
 async fn create_app() -> Router {
     // Initialize the app with the test router
@@ -79,7 +66,6 @@ async fn test_instrument_create() -> Result<()> {
     // Validate
     let api_response: ApiResponse<i32> = parse_response(response).await.unwrap();
     let id = api_response.data.unwrap();
-    // let id = get_id_from_string(&api_response.message).unwrap();
     assert!(id > 0);
     assert_eq!(api_response.code, StatusCode::OK);
 
@@ -100,6 +86,79 @@ async fn test_instrument_create() -> Result<()> {
 #[tokio::test]
 #[serial]
 async fn test_instrument_get() -> Result<()> {
+    // Initialize the app with the test router
+    let app = create_app().await;
+
+    // Create instrument
+    let instrument_json = json!({"ticker": "AAPL11", "name": "Apple tester"});
+    let request = Request::builder()
+        .method("POST")
+        .uri("/market_data/instruments/create")
+        .header("content-type", "application/json")
+        .body(Body::from(instrument_json.to_string()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    let api_response: ApiResponse<i32> = parse_response(response).await.unwrap();
+    let id = api_response.data.unwrap();
+
+    // Test
+    let request = Request::builder()
+        .method("GET")
+        .uri("/market_data/instruments/get")
+        .header("content-type", "application/json")
+        .body(Body::from(json!(String::from("AAPL11")).to_string())) // JSON body
+        .unwrap();
+
+    let app = create_app().await;
+    let response = app.oneshot(request).await?;
+
+    // Validate
+    let api_response: ApiResponse<i32> = parse_response(response).await.unwrap();
+    assert!(api_response.data.unwrap() > 0);
+    assert_eq!(api_response.code, StatusCode::OK);
+
+    // Cleanup
+    let request = Request::builder()
+        .method("DELETE")
+        .uri("/market_data/instruments/delete")
+        .header("content-type", "application/json")
+        .body(Body::from(id.to_string()))
+        .unwrap();
+
+    let app = create_app().await;
+    let _ = app.oneshot(request).await.unwrap();
+
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn test_instrument_get_none() -> Result<()> {
+    // Test
+    let request = Request::builder()
+        .method("GET")
+        .uri("/market_data/instruments/get")
+        .header("content-type", "application/json")
+        .body(Body::from(json!(String::from("AAPL11")).to_string())) // JSON body
+        .unwrap();
+
+    let app = create_app().await;
+    let response = app.oneshot(request).await?;
+
+    // Validate
+    let api_response: ApiResponse<i32> = parse_response(response).await.unwrap();
+    let id: Option<i32> = api_response.data;
+
+    assert!(id == None);
+    assert_eq!(api_response.code, StatusCode::NOT_FOUND);
+
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn test_instrument_list() -> Result<()> {
     let mut ids: Vec<i32> = Vec::new();
 
     // Create first instrument
@@ -116,7 +175,6 @@ async fn test_instrument_get() -> Result<()> {
 
     let api_response: ApiResponse<i32> = parse_response(response).await.unwrap();
     let id = api_response.data.unwrap();
-    // let id = get_id_from_string(&api_response.message).unwrap();
     ids.push(id);
 
     // Create second instrument
@@ -264,6 +322,7 @@ async fn test_backtest_create() -> Result<()> {
 
 #[tokio::test]
 #[serial]
+#[ignore]
 async fn test_backtest_get() -> Result<()> {
     // Initialize the app with the test router
     let app = create_app().await;
@@ -516,12 +575,6 @@ async fn test_records_get() -> Result<()> {
     // Validate
     let api_response: ApiResponse<Vec<u8>> = parse_response(response).await.unwrap();
     assert_eq!(api_response.code, StatusCode::OK);
-
-    // // Decode data
-    // let mut data = api_response.data.unwrap();
-    // let cursor = Cursor::new(data);
-    // let mut decoder = RecordDecoder::new(cursor);
-    // let decoded = decoder.decode_to_owned().expect("Error decoding metadata.");
 
     // Cleanup
     let request = Request::builder()

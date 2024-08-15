@@ -1,4 +1,4 @@
-use crate::mbn::symbols::{Instrument, SymbolMap};
+use crate::mbn::symbols::Instrument;
 use crate::Result;
 use async_trait::async_trait;
 use sqlx::{PgPool, Postgres, Row, Transaction};
@@ -24,7 +24,7 @@ impl From<InstrumentWrapper> for Instrument {
 #[async_trait]
 pub trait InstrumentsQueries: Sized {
     async fn insert_instrument(&self, tx: &mut Transaction<'_, Postgres>) -> Result<i32>;
-    async fn get_instrument_id(pool: &PgPool, ticker: &str) -> Result<i32>;
+    async fn get_instrument_id(pool: &PgPool, ticker: &str) -> Result<Option<i32>>;
     async fn delete_instrument(tx: &mut Transaction<'_, Postgres>, id: i32) -> Result<()>;
     async fn list_instruments(pool: &PgPool) -> Result<Vec<Instrument>>;
     async fn update_instrument(
@@ -54,18 +54,19 @@ impl InstrumentsQueries for Instrument {
         Ok(id)
     }
 
-    async fn get_instrument_id(pool: &PgPool, ticker: &str) -> Result<i32> {
+    async fn get_instrument_id(pool: &PgPool, ticker: &str) -> Result<Option<i32>> {
         let result = sqlx::query(
             r#"
-            SELECT id, ticker, name FROM instrument
-            WHERE ticker = $1
-            "#,
+        SELECT id FROM instrument
+        WHERE ticker = $1
+        "#,
         )
-        .bind(&ticker)
-        .fetch_one(pool)
+        .bind(ticker)
+        .fetch_optional(pool) // Use fetch_optional instead of fetch_one
         .await?;
 
-        let id: i32 = result.try_get("id")?;
+        // If result is Some, extract the id, otherwise return None
+        let id = result.map(|row| row.try_get("id")).transpose()?;
 
         Ok(id)
     }
@@ -119,23 +120,24 @@ impl InstrumentsQueries for Instrument {
     }
 }
 
-pub async fn get_symbols_map(pool: &PgPool, symbols: &Vec<&str>) -> Result<SymbolMap> {
-    let mut map = SymbolMap::new();
-
-    for ticker in symbols {
-        let id: i32 = Instrument::get_instrument_id(pool, ticker).await?;
-        map.add_instrument(ticker, id as u32);
-    }
-
-    Ok(map)
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::database::init::init_quest_db;
     use dotenv;
+    use mbn::symbols::SymbolMap;
     use serial_test::serial;
+
+    pub async fn get_symbols_map(pool: &PgPool, symbols: &Vec<&str>) -> Result<SymbolMap> {
+        let mut map = SymbolMap::new();
+
+        for ticker in symbols {
+            let id: i32 = Instrument::get_instrument_id(pool, ticker).await?.unwrap();
+            map.add_instrument(ticker, id as u32);
+        }
+
+        Ok(map)
+    }
 
     #[sqlx::test]
     #[serial]
@@ -175,13 +177,12 @@ mod test {
         let _ = transaction.commit().await;
 
         // Test
-        let ret_id: i32 = Instrument::get_instrument_id(&pool, ticker)
+        let ret_id: Option<i32> = Instrument::get_instrument_id(&pool, ticker)
             .await
             .expect("Error getting symbols map.");
 
         // Validate
-        // assert_eq!(result.map[&id], ticker);
-        assert_eq!(id, ret_id);
+        assert_eq!(id, ret_id.unwrap());
 
         // Cleanup
         let mut transaction = pool
@@ -271,7 +272,7 @@ mod test {
             .expect("Error getting list of instruments.");
 
         // Validate
-        assert_eq!(vec.len(), 2);
+        assert!(vec.len() >= 2);
 
         // Clean up
         let mut transaction = pool

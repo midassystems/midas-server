@@ -4,12 +4,11 @@ use mbn::backtest::{
     BacktestData, DailyTimeseriesStats, Parameters, PeriodTimeseriesStats, Signals, StaticStats,
     Trades,
 };
-use serde_json::{json, Value};
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
 #[async_trait]
 pub trait BacktestDataQueries {
-    async fn retrieve_backtest_names(pool: &PgPool) -> Result<serde_json::Value>;
+    async fn retrieve_backtest_names(pool: &PgPool) -> Result<Vec<(i32, String)>>;
     async fn insert_query(&self, tx: &mut Transaction<'_, Postgres>) -> Result<i32>;
     async fn delete_query(tx: &mut Transaction<'_, Postgres>, backtest_id: i32) -> Result<()>;
     async fn retrieve_query(pool: &PgPool, id: i32) -> Result<String>;
@@ -17,23 +16,17 @@ pub trait BacktestDataQueries {
 
 #[async_trait]
 impl BacktestDataQueries for BacktestData {
-    async fn retrieve_backtest_names(pool: &PgPool) -> Result<Value> {
-        let rows: Vec<(String,)> = sqlx::query_as(
+    async fn retrieve_backtest_names(pool: &PgPool) -> Result<Vec<(i32, String)>> {
+        let rows: Vec<(i32, String)> = sqlx::query_as(
             r#"
-            SELECT backtest_name
+            SELECT id, backtest_name
             FROM Backtest
             "#,
         )
         .fetch_all(pool)
         .await?;
 
-        // Convert rows into a JSON array
-        let backtest_names: Vec<Value> = rows.into_iter().map(|row| json!(row.0)).collect();
-
-        // Wrap the array in a JSON object if needed
-        let result = json!({ "backtest_names": backtest_names });
-
-        Ok(result)
+        Ok(rows)
     }
 
     async fn insert_query(&self, tx: &mut Transaction<'_, Postgres>) -> Result<i32> {
@@ -455,7 +448,6 @@ pub async fn retrieve_backtest_related(pool: &PgPool, backtest_id: i32) -> Resul
     let daily_timeseries_stats = DailyTimeseriesStats::retrieve_query(pool, backtest_id).await?;
     let trades = Trades::retrieve_query(pool, backtest_id).await?;
     let signals = Signals::retrieve_query(pool, backtest_id).await?;
-    println!("related got");
 
     Ok(BacktestData {
         backtest_id: Some(backtest_id as u16),

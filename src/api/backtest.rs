@@ -16,6 +16,7 @@ pub fn backtest_service() -> Router {
         .route("/create", post(create_backtest))
         .route("/delete", delete(delete_backtest))
         .route("/get", get(retrieve_backtest))
+        .route("/list", get(list_backtest))
 }
 
 // Handlers
@@ -39,6 +40,20 @@ pub async fn create_backtest(
             let _ = transaction.rollback().await;
             Err(e.into())
         }
+    }
+}
+
+pub async fn list_backtest(
+    Extension(pool): Extension<PgPool>,
+) -> Result<ApiResponse<Vec<(i32, String)>>> {
+    match BacktestData::retrieve_backtest_names(&pool).await {
+        Ok(data) => Ok(ApiResponse::new(
+            "success",
+            "Successfully retrieved backtest names.",
+            StatusCode::OK,
+            Some(data),
+        )),
+        Err(e) => Err(e.into()),
     }
 }
 
@@ -125,6 +140,37 @@ mod test {
         // Cleanup
         let number = get_id_from_string(&result.message);
         if number.is_some() {
+            let _ = delete_backtest(Extension(pool.clone()), Json(number.unwrap())).await;
+        }
+    }
+
+    #[sqlx::test]
+    #[serial]
+    async fn test_list_backtest() {
+        dotenv::dotenv().ok();
+        let pool = init_pg_db().await.unwrap();
+
+        // Pull test data
+        let mock_data =
+            fs::read_to_string("tests/data/test_data.backtest.json").expect("Unable to read file");
+        let backtest_data: BacktestData =
+            serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
+
+        let result = create_backtest(Extension(pool.clone()), Json(backtest_data))
+            .await
+            .unwrap();
+
+        let number = get_id_from_string(&result.message);
+        let backtest_id = number.clone();
+
+        // Test
+        let backtests = list_backtest(Extension(pool.clone())).await.unwrap();
+
+        // Validate
+        println!("{:?}", backtests.data.unwrap());
+
+        // Cleanup
+        if backtest_id.is_some() {
             let _ = delete_backtest(Extension(pool.clone()), Json(number.unwrap())).await;
         }
     }
