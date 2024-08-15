@@ -21,6 +21,7 @@ pub struct RetrieveParams {
 impl RetrieveParams {
     fn schema_interval(&self) -> Result<i64> {
         let schema = Schema::from_str(&self.schema)?;
+        println!("{:?}", schema);
         match schema {
             Schema::Ohlcv1S => Ok(1),
             Schema::Ohlcv1M => Ok(60),
@@ -49,8 +50,6 @@ pub trait RecordInsertQueries {
 #[async_trait]
 impl RecordInsertQueries for Mbp1Msg {
     async fn insert_query(&self, tx: &mut Transaction<'_, Postgres>) -> Result<()> {
-        println!("{:?}", self.action);
-        println!("{:?}", self.action as i8);
         // Insert into mbp table
         let mbp_id: i32 = sqlx::query_scalar(
             r#"
@@ -152,7 +151,6 @@ impl RecordRetrieveQueries for Mbp1Msg {
             let instrument_id = row.try_get::<i32, _>("instrument_id")? as u32;
             let ticker: String = row.try_get("ticker")?;
             let record = Mbp1Msg::from_row(row)?;
-            println!("got row.");
 
             records.push(record);
             symbol_map.add_instrument(&ticker, instrument_id);
@@ -164,8 +162,6 @@ impl RecordRetrieveQueries for Mbp1Msg {
 
 impl FromRow for Mbp1Msg {
     fn from_row(row: sqlx::postgres::PgRow) -> Result<Self> {
-        println!("getting the row.");
-
         Ok(Mbp1Msg {
             hd: RecordHeader::new::<Mbp1Msg>(
                 row.try_get::<i32, _>("instrument_id")? as u32,
@@ -199,6 +195,7 @@ impl RecordRetrieveQueries for OhlcvMsg {
         pool: &PgPool,
         params: &RetrieveParams,
     ) -> Result<(Vec<Self>, SymbolMap)> {
+        println!("In the ohlcv databas query.");
         // Convert the Vec<String> symbols to an array for binding
         let symbol_array: Vec<&str> = params.symbols.iter().map(AsRef::as_ref).collect();
 
@@ -210,8 +207,8 @@ impl RecordRetrieveQueries for OhlcvMsg {
                 m.ts_event,
                 m.price,
                 m.size,
-                row_number() OVER (PARTITION BY floor(m.ts_event / 1000000000 / $3) * $3 ORDER BY m.ts_event ASC) AS first_row,
-                row_number() OVER (PARTITION BY floor(m.ts_event / 1000000000 / $3) * $3 ORDER BY m.ts_event DESC) AS last_row
+                row_number() OVER (PARTITION BY m.instrument_id, floor(m.ts_event / 1000000000 / $3) * $3 ORDER BY m.ts_event ASC) AS first_row,
+                row_number() OVER (PARTITION BY m.instrument_id, floor(m.ts_event / 1000000000 / $3) * $3 ORDER BY m.ts_event DESC) AS last_row
               FROM mbp m
               INNER JOIN instrument i ON m.instrument_id = i.id
               WHERE m.ts_event BETWEEN $1 AND $2
@@ -232,7 +229,7 @@ impl RecordRetrieveQueries for OhlcvMsg {
                 floor(ts_event / 1000000000 / $3) * $3
             )
             SELECT
-              a.instrument_id,
+              a.instrument_id, 
               CAST(a.ts_event AS BIGINT), -- Keep as nanoseconds
               a.open,
               a.close,
@@ -290,19 +287,14 @@ impl RecordRetrieveQueries for RecordEnum {
         pool: &PgPool,
         params: &RetrieveParams,
     ) -> Result<(Vec<Self>, SymbolMap)> {
-        // tracing::info!("{}", params.rtype().unwrap());
         let (records, map) = match RType::from(params.rtype().unwrap()) {
             RType::Mbp1 => {
                 let (records, map) = Mbp1Msg::retrieve_query(pool, params).await?;
                 (records.into_iter().map(RecordEnum::Mbp1).collect(), map)
-                // Ok((rec_enum, hash_map))
             }
             RType::Ohlcv => {
                 let (records, map) = OhlcvMsg::retrieve_query(pool, params).await?;
-                // records.into_iter().map(RecordEnum::Ohlcv).collect()
                 (records.into_iter().map(RecordEnum::Ohlcv).collect(), map)
-
-                // Ok((rec_enum, hash_map))
             }
         };
         Ok((records, map))
@@ -337,7 +329,6 @@ mod test {
 
     #[sqlx::test]
     #[serial]
-    #[ignore]
     async fn test_create_record() {
         dotenv::dotenv().ok();
         let pool = init_quest_db().await.unwrap();
@@ -398,8 +389,6 @@ mod test {
             .await
             .expect("Error inserting records.");
 
-        // transaction.commit().await.expect("testing");
-
         // Validate
         assert_eq!(result, ());
 
@@ -413,7 +402,6 @@ mod test {
 
     #[sqlx::test]
     #[serial]
-    // #[ignore]
     async fn test_retrieve_mbp1() {
         dotenv::dotenv().ok();
         let pool = init_quest_db().await.unwrap();
@@ -482,13 +470,9 @@ mod test {
             schema: String::from("mbp_1"),
         };
 
-        println!("{:?}", query_params);
-
-        let (records, hash_map) = Mbp1Msg::retrieve_query(&pool, &query_params)
+        let (records, _hash_map) = Mbp1Msg::retrieve_query(&pool, &query_params)
             .await
             .expect("Error on retrieve records.");
-        println!("{:?}", records);
-        println!("{:?}", hash_map);
 
         // Validate
         assert!(records.len() > 0);
@@ -508,7 +492,7 @@ mod test {
 
     #[sqlx::test]
     #[serial]
-    #[ignore]
+    // #[ignore]
     async fn test_retrieve_ohlcv() {
         dotenv::dotenv().ok();
         let pool = init_quest_db().await.unwrap();
@@ -577,11 +561,10 @@ mod test {
             schema: String::from("ohlcv-1d"),
         };
 
-        let (result, hash_map) = OhlcvMsg::retrieve_query(&pool, &query_params)
+        let (result, _hash_map) = OhlcvMsg::retrieve_query(&pool, &query_params)
             .await
             .expect("Error on retrieve records.");
 
-        println!("{:?}, {:?}", result, hash_map);
         // Validate
         assert!(result.len() > 0);
 

@@ -15,6 +15,7 @@ pub fn instrument_service() -> Router {
         .route("/delete", delete(delete_instrument))
         .route("/list", get(list_instruments))
         .route("/update", put(update_instrument_id))
+        .route("/get", get(get_instrument))
 }
 
 // Handlers
@@ -36,6 +37,33 @@ pub async fn create_instrument(
         }
         Err(e) => {
             let _ = tx.rollback().await;
+            Err(e.into())
+        }
+    }
+}
+
+pub async fn get_instrument(
+    Extension(pool): Extension<PgPool>,
+    Json(ticker): Json<String>,
+) -> Result<ApiResponse<Option<i32>>> {
+    match Instrument::get_instrument_id(&pool, &ticker).await {
+        Ok(Some(id)) => Ok(ApiResponse::new(
+            "success",
+            &format!("Successfully retrieved instrument id {}", id),
+            StatusCode::OK,
+            Some(Some(id)),
+        )),
+        Ok(None) => {
+            // The ticker was not found, return a successful response with None
+            Ok(ApiResponse::new(
+                "success",
+                &format!("No instrument found for ticker {}", ticker),
+                StatusCode::NOT_FOUND,
+                None,
+            ))
+        }
+        Err(e) => {
+            // Handle the error case
             Err(e.into())
         }
     }
@@ -144,6 +172,51 @@ mod test {
         if number.is_some() {
             let _ = delete_instrument(Extension(pool.clone()), Json(number.unwrap())).await;
         }
+    }
+
+    #[sqlx::test]
+    #[serial]
+    async fn test_get_instrument_id() {
+        dotenv::dotenv().ok();
+        let pool = init_quest_db().await.unwrap();
+
+        let instrument = Instrument::new("AAPL", "Apple Inc.", None);
+
+        let result = create_instrument(Extension(pool.clone()), Json(instrument))
+            .await
+            .unwrap();
+
+        // Test
+        let response = get_instrument(Extension(pool.clone()), Json("AAPL".to_string()))
+            .await
+            .unwrap();
+
+        // Validate
+        assert_eq!(response.code, StatusCode::OK);
+        assert!(response
+            .message
+            .contains("Successfully retrieved instrument id"));
+
+        // Cleanup
+        let number = get_id_from_string(&result.message);
+        if number.is_some() {
+            let _ = delete_instrument(Extension(pool.clone()), Json(number.unwrap())).await;
+        }
+    }
+
+    #[sqlx::test]
+    #[serial]
+    async fn test_get_instrument_id_none() {
+        dotenv::dotenv().ok();
+        let pool = init_quest_db().await.unwrap();
+
+        // Test
+        let response = get_instrument(Extension(pool.clone()), Json("AAPL".to_string()))
+            .await
+            .unwrap();
+
+        // Validate
+        assert_eq!(response.code, StatusCode::NOT_FOUND);
     }
 
     #[sqlx::test]

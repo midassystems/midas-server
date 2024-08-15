@@ -13,6 +13,7 @@ CREATE TABLE Parameters (
     backtest_id INTEGER NOT NULL,
     strategy_name VARCHAR(255) NOT NULL,
     capital FLOAT NOT NULL,
+    schema VARCHAR(10),
     data_type VARCHAR(10) NOT NULL,
     train_start BIGINT NOT NULL,
     train_end BIGINT NOT NULL,

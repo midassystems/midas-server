@@ -1,5 +1,5 @@
 [package]
-name = "midasbackend"
+name = "midas-server"
 version = "0.1.0"
 edition = "2021"
 
@@ -12,8 +12,6 @@ serde = { version = "1.0", features = ["derive"] }
 sqlx = { version = "0.6", features = ["postgres","runtime-tokio-rustls", "runtime-actix-rustls", "macros", "bigdecimal", "json"] }
 tokio = { version = "1.0", features = ["full"] }
 bigdecimal = { version = "0.3", features = ["serde"] }
-# mbn = {path="../mbn/mbn/"}
-mbn = { git = "https://github.com/anthonyb8/mbn.git", branch = "main" }
 serde_json = "1.0"
 async-trait = "0.1.80"
 axum = "0.6"
@@ -26,6 +24,8 @@ thiserror = "1.0.61"
 anyhow = "1.0.86"
 derive_more = {version = "1.0.0-beta", features = ["from"]}
 base64 = "0.13"
+# mbn = {path="../mbn/mbn/"}
+mbn = { git = "https://github.com/anthonyb8/mbn.git", branch = "main" }
 
 [dev-dependencies]
 actix-rt = "2.4"

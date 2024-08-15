@@ -1,11 +1,12 @@
+mod logger;
+
 use dotenv::dotenv;
-use midasbackend::database::init::{init_pg_db, init_quest_db};
-use midasbackend::error::Result;
-use midasbackend::logger::system_logger;
-use midasbackend::router;
+use logger::system_logger;
+use midas_server::database::init::{init_pg_db, init_quest_db};
+use midas_server::error::Result;
+use midas_server::router;
 use std::env;
 use std::net::SocketAddr;
-mod logger;
 // use crate::logger::system_logger;
 
 #[tokio::main]

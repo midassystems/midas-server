@@ -58,18 +58,11 @@ pub async fn get_records(
 ) -> Result<ApiResponse<Vec<u8>>> {
     // Retrieve Records
     let (records, map) = RecordEnum::retrieve_query(&pool, &params).await?;
+
     let record_refs: Vec<RecordRef> = records
         .iter()
         .map(|record| record.to_record_ref())
         .collect();
-
-    // Encode Records
-    // let mut buffer = Vec::new();
-    // let mut encoder = RecordEncoder::new(&mut buffer);
-    // encoder.encode_records(&record_refs)?;
-    // // Symbols map
-    // let map = SymbolMap::new();
-    // map.add_instrument(ticker, id);
 
     // Metadata
     let metadata = Metadata::new(
@@ -278,10 +271,6 @@ mod test {
             .unwrap();
 
         // Validate
-        // let cursor = Cursor::new(result);
-        // let mut decoder = CombinedDecoder::new(cursor);
-        // let decoded = decoder.decode_metadata_and_records();
-        // println!("{:?}", decoded);
         assert!(result.len() > 0);
 
         // Cleanup
