@@ -154,43 +154,92 @@ impl StaticStatsQueries for StaticStats {
     ) -> Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO backtest_StaticStats (backtest_id, net_profit, total_fees, ending_equity, avg_trade_profit, total_return, annual_standard_deviation_percentage, max_drawdown_percentage, avg_win_percentage, avg_loss_percentage, percent_profitable, total_trades, number_winning_trades, number_losing_trades, profit_and_loss_ratio, profit_factor, sortino_ratio, sharpe_ratio)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-            "#
+            INSERT INTO backtest_StaticStats (
+            backtest_id,
+            total_trades,
+            total_winning_trades,
+            total_losing_trades,
+            avg_profit,
+            avg_profit_percent,
+            avg_gain,
+            avg_gain_percent,
+            avg_loss,
+            avg_loss_percent,
+            profitability_ratio,
+            profit_factor,
+            profit_and_loss_ratio,
+            total_fees,
+            net_profit,
+            beginning_equity,
+            ending_equity,
+            total_return,
+            daily_standard_deviation_percentage,
+            annual_standard_deviation_percentage,
+            max_drawdown_percentage_period,
+            max_drawdown_percentage_daily,
+            sharpe_ratio,
+            sortino_ratio)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+            "#,
         )
         .bind(&backtest_id)
-        .bind(&self.net_profit)
-        .bind(&self.total_fees)
-        .bind(&self.ending_equity)
-        .bind(&self.avg_trade_profit)
-        .bind(&self.total_return)
-        .bind(&self.annual_standard_deviation_percentage)
-        .bind(&self.max_drawdown_percentage)
-        .bind(&self.avg_win_percentage)
-        .bind(&self.avg_loss_percentage)
-        .bind(&self.percent_profitable)
         .bind(&self.total_trades)
-        .bind(&self.number_winning_trades)
-        .bind(&self.number_losing_trades)
-        .bind(&self.profit_and_loss_ratio)
+        .bind(&self.total_winning_trades)
+        .bind(&self.total_losing_trades)
+        .bind(&self.avg_profit)
+        .bind(&self.avg_profit_percent)
+        .bind(&self.avg_gain)
+        .bind(&self.avg_gain_percent)
+        .bind(&self.avg_loss)
+        .bind(&self.avg_loss_percent)
+        .bind(&self.profitability_ratio)
         .bind(&self.profit_factor)
-        .bind(&self.sortino_ratio)
+        .bind(&self.profit_and_loss_ratio)
+        .bind(&self.total_fees)
+        .bind(&self.net_profit)
+        .bind(&self.beginning_equity)
+        .bind(&self.ending_equity)
+        .bind(&self.total_return)
+        .bind(&self.daily_standard_deviation_percentage)
+        .bind(&self.annual_standard_deviation_percentage)
+        .bind(&self.max_drawdown_percentage_period)
+        .bind(&self.max_drawdown_percentage_daily)
         .bind(&self.sharpe_ratio)
+        .bind(&self.sortino_ratio)
         .execute(tx)
         .await?;
         Ok(())
     }
 
     async fn retrieve_query(pool: &PgPool, backtest_id: i32) -> Result<Self> {
-        let row : StaticStats = sqlx::query_as(
+        let row: StaticStats = sqlx::query_as(
             r#"
-            SELECT net_profit, total_fees, ending_equity, avg_trade_profit, total_return, 
-                annual_standard_deviation_percentage, max_drawdown_percentage, avg_win_percentage, 
-                avg_loss_percentage, percent_profitable, total_trades, number_winning_trades, 
-                number_losing_trades, profit_and_loss_ratio, profit_factor, sortino_ratio, sharpe_ratio
+            SELECT  total_trades,
+                total_winning_trades,
+                total_losing_trades,
+                avg_profit,
+                avg_profit_percent,
+                avg_gain,
+                avg_gain_percent,
+                avg_loss,
+                avg_loss_percent,
+                profitability_ratio,
+                profit_factor,
+                profit_and_loss_ratio,
+                total_fees,
+                net_profit,
+                beginning_equity,
+                ending_equity,
+                total_return,
+                daily_standard_deviation_percentage,
+                annual_standard_deviation_percentage,
+                max_drawdown_percentage_period,
+                max_drawdown_percentage_daily,
+                sharpe_ratio,
+            sortino_ratio            
             FROM backtest_StaticStats
             WHERE backtest_id = $1
-            "#
+            "#,
         )
         .bind(backtest_id)
         .fetch_one(pool)

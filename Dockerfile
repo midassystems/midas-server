@@ -35,7 +35,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Copy the compiled binary from the builder
-COPY --from=builder /app/target/release/midasbackend /app/midasbackend
+COPY --from=builder /app/target/release/midas-server /app/midas-server
 
 # Set the command to run the binary
-CMD ["./midasbackend"]
+CMD ["./midas-server"]

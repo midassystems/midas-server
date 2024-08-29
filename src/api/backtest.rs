@@ -4,11 +4,14 @@ use crate::database::backtest::{
 };
 use crate::error::Result;
 use crate::response::ApiResponse;
+use crate::Error;
+use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::routing::{delete, get, post};
 use axum::{Extension, Json, Router};
 use mbn::backtest::BacktestData;
 use sqlx::PgPool;
+use std::collections::hash_map::HashMap;
 
 // Service
 pub fn backtest_service() -> Router {
@@ -59,8 +62,13 @@ pub async fn list_backtest(
 
 pub async fn retrieve_backtest(
     Extension(pool): Extension<PgPool>,
-    Json(id): Json<i32>,
+    Query(params): Query<HashMap<String, String>>,
 ) -> Result<ApiResponse<BacktestData>> {
+    let id: i32 = params
+        .get("id")
+        .and_then(|id_str| id_str.parse().ok())
+        .ok_or_else(|| Error::GeneralError("Invalid id parameter".into()))?;
+
     match retrieve_backtest_related(&pool, id).await {
         Ok(backtest) => Ok(ApiResponse::new(
             "success",
@@ -167,7 +175,7 @@ mod test {
         let backtests = list_backtest(Extension(pool.clone())).await.unwrap();
 
         // Validate
-        println!("{:?}", backtests.data.unwrap());
+        assert!(backtests.data.unwrap().len() > 0);
 
         // Cleanup
         if backtest_id.is_some() {
@@ -184,10 +192,10 @@ mod test {
         // Pull test data
         let mock_data =
             fs::read_to_string("tests/data/test_data.backtest.json").expect("Unable to read file");
-        let backtest_data: BacktestData =
+        let backtest_data_obj: BacktestData =
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
-        let result = create_backtest(Extension(pool.clone()), Json(backtest_data))
+        let result = create_backtest(Extension(pool.clone()), Json(backtest_data_obj.clone()))
             .await
             .unwrap();
 
@@ -195,9 +203,19 @@ mod test {
         let backtest_id = number.clone();
 
         // Test
-        let _ = retrieve_backtest(Extension(pool.clone()), Json(number.unwrap()))
+        let mut params = HashMap::new();
+        params.insert("id".to_string(), number.unwrap().to_string());
+
+        // Test
+        let backtest_data = retrieve_backtest(Extension(pool.clone()), Query(params))
             .await
             .unwrap();
+
+        // Validate
+        assert_eq!(
+            backtest_data.data.unwrap().parameters,
+            backtest_data_obj.parameters
+        );
 
         // Cleanup
         if backtest_id.is_some() {

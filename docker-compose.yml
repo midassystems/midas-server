@@ -12,7 +12,10 @@ services:
       - postgres_db
     ports:
       - "8080:8080"  # Expose the app port to the host
-    command: ["./midasbackend"]
+    command: ["./midas-server"]
+    volumes:
+      - ./bulk_data:/app/bulk_data
+      - ./logs:/app/logs
 
   # Application service for market data
   market_data:
@@ -25,7 +28,7 @@ services:
     #   - "5434:5432"  # Host Port : Container Port for market_data
     depends_on:
       - postgres_db  # Wait for the database to be ready
-    command: ["./migrate.sh", "market"]
+    command: ["/bin/bash", "-c", "./migrate.sh market"]
 
   # Application service for trading data
   trading_data:
@@ -38,7 +41,7 @@ services:
     #   - "5435:5432"  # Host Port : Container Port for trading_data
     depends_on:
       - postgres_db  # Wait for the database to be ready
-    command: ["./migrate.sh", "trading"]
+    command: ["/bin/bash", "-c", "./migrate.sh trading"]
 
   # Single PostgreSQL service hosting both databases
   postgres_db:
