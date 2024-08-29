@@ -4,7 +4,7 @@ use sqlx::Row;
 
 /// Used for debugging purposes.
 #[allow(dead_code)]
-fn print_pg_row(row: &sqlx::postgres::PgRow) -> anyResult<()> {
+pub fn print_pg_row(row: &sqlx::postgres::PgRow) -> anyResult<()> {
     for column in row.columns() {
         let column_name = column.name();
 

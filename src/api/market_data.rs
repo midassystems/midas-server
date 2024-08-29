@@ -1,24 +1,30 @@
 use crate::database::market_data::{RecordInsertQueries, RecordRetrieveQueries, RetrieveParams};
+use crate::mbn::decode::decoder_from_file;
 use crate::mbn::record_enum::RecordEnum;
-use crate::mbn::record_ref::RecordRef;
 use crate::response::ApiResponse;
-use crate::Result;
+use crate::{Error, Result};
+use async_stream::stream;
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
-use axum::{Extension, Json, Router};
+use axum::{body::StreamBody, Extension, Json, Router};
+use bytes::Bytes;
 use mbn::decode::RecordDecoder;
 use mbn::encode::CombinedEncoder;
 use mbn::enums::Schema;
 use mbn::metadata::Metadata;
 use sqlx::PgPool;
 use std::io::Cursor;
+use std::path::Path;
 use std::str::FromStr;
+use tracing::info;
 
 // Service
 pub fn market_data_service() -> Router {
     Router::new()
         .route("/create", post(create_record))
         .route("/get", get(get_records))
+        .route("/bulk_upload", post(bulk_upload))
 }
 
 // Handlers
@@ -38,7 +44,6 @@ pub async fn create_record(
             RecordEnum::Mbp1(record) => {
                 record.insert_query(&mut tx).await?;
             }
-            // Add cases for other record types if needed
             _ => unimplemented!(),
         }
     }
@@ -52,37 +57,125 @@ pub async fn create_record(
     ))
 }
 
-pub async fn get_records(
+pub async fn bulk_upload(
     Extension(pool): Extension<PgPool>,
-    Json(params): Json<RetrieveParams>,
-) -> Result<ApiResponse<Vec<u8>>> {
-    // Retrieve Records
-    let (records, map) = RecordEnum::retrieve_query(&pool, &params).await?;
+    Json(file_name): Json<String>,
+) -> Result<ApiResponse<()>> {
+    const BATCH_SIZE: usize = 5000;
 
-    let record_refs: Vec<RecordRef> = records
-        .iter()
-        .map(|record| record.to_record_ref())
-        .collect();
+    // Construct the full file path
+    let bulk_data_dir = "/app/bulk_data/";
+    let file_path = Path::new(bulk_data_dir).join(file_name);
+    let file_path_str = file_path
+        .to_str()
+        .ok_or_else(|| Error::CustomError("Error converting file path to string".to_string()))?;
 
-    // Metadata
-    let metadata = Metadata::new(
-        Schema::from_str(&params.schema)?,
-        params.start_ts as u64,
-        params.end_ts as u64,
-        map,
-    );
+    // Decode binary file
+    let mut records_in_batch = 0;
+    let mut tx = pool.begin().await?;
 
-    // Encode Metadata & Records
-    let mut buffer = Vec::new();
-    let mut encoder = CombinedEncoder::new(&mut buffer);
-    encoder.encode_metadata_and_records(&metadata, &record_refs)?;
+    let mut decoder = decoder_from_file(&file_path_str)?;
+    let mut decode_iter = decoder.decode_iterator();
+    while let Some(record_result) = decode_iter.next() {
+        // info!("Record {:?}", records_in_batch);
+        // info!("Record {:?}", record_result);
+        match record_result {
+            Ok(record) => {
+                match record {
+                    RecordEnum::Mbp1(msg) => {
+                        msg.insert_query(&mut tx).await?;
+                        records_in_batch += 1;
+                    }
+                    _ => unimplemented!(),
+                }
+                if records_in_batch >= BATCH_SIZE {
+                    info!("Committing batch of records.");
+                    tx.commit().await?;
+                    tx = pool.begin().await?;
+                    records_in_batch = 0; // Reset batch counter
+                }
+            }
+            Err(e) => {
+                return Err(Error::CustomError(format!(
+                    "Failed to decode record: {}",
+                    e
+                )));
+            }
+        }
+    }
+
+    // Commit any remaining records in the last batch
+    if records_in_batch > 0 {
+        tx.commit().await?;
+    }
 
     Ok(ApiResponse::new(
         "success",
-        "",
+        "Successfully inserted records.",
         StatusCode::OK,
-        Some(buffer),
+        None,
     ))
+}
+
+pub async fn get_records(
+    Extension(pool): Extension<PgPool>,
+    Json(params): Json<RetrieveParams>,
+) -> impl IntoResponse {
+    const BATCH_SIZE: i64 = 86400000000000; // One day in nanoseconds
+
+    let bytes_stream = stream! {
+        let mut buffer = Vec::new();
+        let mut metadata_sent = false;
+        let mut clone_params = params.clone();
+
+        loop {
+            let (records, map) = match RecordEnum::retrieve_query(&pool, &mut clone_params, BATCH_SIZE).await {
+                Ok((records, map)) => (records, map),
+                Err(e) => {
+                    println!("Error during query: {:?}", e);
+                    yield Err(Error::from(e));
+                    return;
+                }
+            };
+
+            if records.is_empty() {
+                break;
+            }
+
+            {
+                let mut encoder = CombinedEncoder::new(&mut buffer);
+
+                if !metadata_sent {
+                    let metadata = Metadata::new(
+                        Schema::from_str(&params.schema).unwrap(),
+                        params.start_ts as u64,
+                        params.end_ts as u64,
+                        map.clone(),
+                    );
+
+                    encoder.encode_metadata(&metadata).unwrap();
+                    metadata_sent = true;
+                }
+
+                for record in records {
+                    let record_ref = record.to_record_ref();
+                    encoder.encode_record(&record_ref).unwrap();
+                }
+            }
+
+            let batch_bytes = Bytes::from(buffer.clone());
+            buffer.clear();
+
+            println!("Sending buffer, currently: {:?}", buffer);
+            yield Ok::<Bytes, Error>(batch_bytes);
+        }
+
+        println!("Finished streaming all batches");
+    };
+
+    println!("Below the stream loop");
+
+    StreamBody::new(bytes_stream)
 }
 
 #[cfg(test)]
@@ -91,12 +184,13 @@ mod test {
     use crate::database::init::init_quest_db;
     use crate::database::symbols::InstrumentsQueries;
     use crate::mbn::encode::RecordEncoder;
+    use crate::mbn::record_ref::RecordRef;
     use crate::mbn::{
         enums::Schema,
         records::{BidAskPair, Mbp1Msg, RecordHeader},
         symbols::Instrument,
     };
-
+    use hyper::body::HttpBody as _;
     use serial_test::serial;
 
     #[sqlx::test]
@@ -124,6 +218,7 @@ mod test {
             action: 1,
             side: 2,
             depth: 0,
+            flags: 130,
             ts_recv: 1704209103644092564,
             ts_in_delta: 17493,
             sequence: 739763,
@@ -137,13 +232,14 @@ mod test {
             }],
         };
         let mbp_2 = Mbp1Msg {
-            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564) },
+            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092566) },
             price: 6870,
             size: 2,
             action: 1,
             side: 1,
             depth: 0,
-            ts_recv: 1704209103644092564,
+            flags: 0,
+            ts_recv: 1704209103644092566,
             ts_in_delta: 17493,
             sequence: 739763,
             levels: [BidAskPair {
@@ -209,6 +305,7 @@ mod test {
             action: 1,
             side: 2,
             depth: 0,
+            flags: 10,
             ts_recv: 1704209103644092564,
             ts_in_delta: 17493,
             sequence: 739763,
@@ -222,13 +319,14 @@ mod test {
             }],
         };
         let mbp_2 = Mbp1Msg {
-            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564) },
+            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092565) },
             price: 6870,
             size: 2,
             action: 1,
             side: 1,
             depth: 0,
-            ts_recv: 1704209103644092564,
+            flags: 0,
+            ts_recv: 1704209103644092565,
             ts_in_delta: 17493,
             sequence: 739763,
             levels: [BidAskPair {
@@ -260,18 +358,27 @@ mod test {
         let params = RetrieveParams {
             symbols: vec!["AAPL".to_string()],
             start_ts: 1704209103644092563,
-            end_ts: 1704209903644092564,
+            end_ts: 1704209903644092569,
             schema: Schema::Mbp1.to_string(),
         };
 
-        let result = get_records(Extension(pool.clone()), Json(params))
+        let response = get_records(Extension(pool.clone()), Json(params))
             .await
-            .expect("Error on get results")
-            .data
-            .unwrap();
+            .into_response();
+
+        let mut body = response.into_body();
+
+        // Collect streamed response
+        let mut all_bytes = Vec::new();
+        while let Some(chunk) = body.data().await {
+            match chunk {
+                Ok(bytes) => all_bytes.extend_from_slice(&bytes),
+                Err(e) => panic!("Error while reading chunk: {:?}", e),
+            }
+        }
 
         // Validate
-        assert!(result.len() > 0);
+        assert!(!all_bytes.is_empty(), "Streamed data should not be empty");
 
         // Cleanup
         let mut transaction = pool

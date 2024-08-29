@@ -322,7 +322,6 @@ async fn test_backtest_create() -> Result<()> {
 
 #[tokio::test]
 #[serial]
-#[ignore]
 async fn test_backtest_get() -> Result<()> {
     // Initialize the app with the test router
     let app = create_app().await;
@@ -345,9 +344,9 @@ async fn test_backtest_get() -> Result<()> {
     // Test
     let request = Request::builder()
         .method("GET")
-        .uri("/trading/backtest/get")
+        .uri(format!("/trading/backtest/get?id={}", id)) // Include the query parameter in the URL
         .header("content-type", "application/json")
-        .body(Body::from(id.to_string()))
+        .body(Body::empty()) // No need to include the id in the body
         .unwrap();
 
     let app = create_app().await;
@@ -401,6 +400,7 @@ async fn test_records_create() -> Result<()> {
         action: 1,
         side: 2,
         depth: 0,
+        flags: 0,
         ts_recv: 1704209103644092564,
         ts_in_delta: 17493,
         sequence: 739763,
@@ -420,6 +420,7 @@ async fn test_records_create() -> Result<()> {
         action: 1,
         side: 1,
         depth: 0,
+        flags: 0,
         ts_recv: 1704209103644092564,
         ts_in_delta: 17493,
         sequence: 739763,
@@ -453,7 +454,7 @@ async fn test_records_create() -> Result<()> {
         .unwrap();
 
     let app = create_app().await;
-    let response = app.oneshot(request).await.unwrap();
+    let response = app.oneshot(request).await?;
 
     // Validate
     let api_response: ApiResponse<()> = parse_response(response).await.unwrap();
@@ -502,6 +503,7 @@ async fn test_records_get() -> Result<()> {
         action: 1,
         side: 2,
         depth: 0,
+        flags: 0,
         ts_recv: 1704209103644092564,
         ts_in_delta: 17493,
         sequence: 739763,
@@ -521,6 +523,7 @@ async fn test_records_get() -> Result<()> {
         action: 1,
         side: 1,
         depth: 0,
+        flags: 0,
         ts_recv: 1704209103644092564,
         ts_in_delta: 17493,
         sequence: 739763,
@@ -573,8 +576,14 @@ async fn test_records_get() -> Result<()> {
     let response = app.oneshot(request).await.unwrap();
 
     // Validate
-    let api_response: ApiResponse<Vec<u8>> = parse_response(response).await.unwrap();
-    assert_eq!(api_response.code, StatusCode::OK);
+    let body = response.into_body();
+
+    // Convert the body to bytes
+    let bytes = to_bytes(body).await.expect("Failed to read response body");
+
+    // Convert bytes to Vec<u8>
+    let all_bytes: Vec<u8> = bytes.to_vec();
+    assert!(!all_bytes.is_empty(), "Streamed data should not be empty");
 
     // Cleanup
     let request = Request::builder()

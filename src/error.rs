@@ -23,6 +23,8 @@ pub enum Error {
     GeneralError(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("MBN error: {0}")]
     MbnError(#[from] mbn::error::Error),
+    #[error("Custom error: {0}")]
+    CustomError(String),
 }
 
 impl From<SqlxError> for Error {
@@ -50,6 +52,7 @@ impl IntoResponse for Error {
             Error::EnvVarError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
             Error::GeneralError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
             Error::MbnError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
+            Error::CustomError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
         };
 
         ApiResponse {
