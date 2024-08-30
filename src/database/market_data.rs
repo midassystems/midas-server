@@ -41,7 +41,6 @@ pub struct RetrieveParams {
 impl RetrieveParams {
     fn schema_interval(&self) -> Result<i64> {
         let schema = Schema::from_str(&self.schema)?;
-        println!("{:?}", schema);
 
         match schema {
             Schema::Mbp1 => Ok(1),                     // 1 nanosecond
@@ -66,21 +65,9 @@ impl RetrieveParams {
     fn batch_interval(&mut self, interval_ns: i64, batch_size: i64) -> Result<i64> {
         // Adjust start timestamp
         self.start_ts = self.interval_adjust_ts(self.start_ts, interval_ns)?;
-
-        // Calculate the batch end timestamp based on batch size
         let calculated_end_ts = self.start_ts + batch_size;
 
-        // Ensure it does not exceed the original end_ts
-        let batch_end_ts = if calculated_end_ts < self.end_ts {
-            calculated_end_ts
-        } else {
-            self.end_ts
-        };
-
-        // Align the batch end timestamp to the nearest interval
-        let adjusted_end_ts = self.interval_adjust_ts(batch_end_ts, interval_ns)?;
-
-        Ok(adjusted_end_ts)
+        Ok(calculated_end_ts)
     }
 }
 
@@ -181,7 +168,11 @@ impl RecordRetrieveQueries for Mbp1Msg {
     ) -> Result<(Vec<Self>, SymbolMap)> {
         // Batch timestamps
         let interval_ns = params.schema_interval()?;
-        let end_ts = params.batch_interval(interval_ns, batch)?;
+        let mut end_ts = params.batch_interval(interval_ns, batch)?;
+        // Make sure end_ts isn't exceeding requested
+        if end_ts > params.end_ts {
+            end_ts = params.end_ts;
+        }
 
         // Convert the Vec<String> symbols to an array for binding
         let symbol_array: Vec<&str> = params.symbols.iter().map(AsRef::as_ref).collect();
@@ -270,47 +261,47 @@ impl RecordRetrieveQueries for OhlcvMsg {
         let symbol_array: Vec<&str> = params.symbols.iter().map(AsRef::as_ref).collect();
 
         let rows = sqlx::query(
-            r#"
-            WITH ordered_data AS (
-              SELECT
-                m.instrument_id,
-                m.ts_event,
-                m.price,
-                m.size,
-                row_number() OVER (PARTITION BY m.instrument_id, floor(m.ts_event / $3) * $3 ORDER BY m.ts_event ASC) AS first_row,
-                row_number() OVER (PARTITION BY m.instrument_id, floor(m.ts_event / $3) * $3 ORDER BY m.ts_event DESC) AS last_row
-              FROM mbp m
-              INNER JOIN instrument i ON m.instrument_id = i.id
-              WHERE m.ts_event BETWEEN $1 AND $2
-              AND i.ticker = ANY($4)
-            ),
-            aggregated_data AS (
-              SELECT
-                instrument_id,
-                floor(ts_event / $3) * $3 AS ts_event, -- Maintain nanoseconds
-                MIN(price) FILTER (WHERE first_row = 1) AS open,
-                MIN(price) FILTER (WHERE last_row = 1) AS close,
-                MIN(price) AS low,
-                MAX(price) AS high,
-                SUM(size) AS volume
-              FROM ordered_data
-              GROUP BY
-                instrument_id,
-                floor(ts_event / $3) * $3
-            )
-            SELECT
-              a.instrument_id, 
-              CAST(a.ts_event AS BIGINT), -- Keep as nanoseconds
-              a.open,
-              a.close,
-              a.low,
-              a.high,
-              a.volume,
-              i.ticker
-            FROM aggregated_data a
-            INNER JOIN instrument i ON a.instrument_id = i.id
-            ORDER BY a.ts_event
-            "#
+        r#"
+        WITH ordered_data AS (
+          SELECT
+            m.instrument_id,
+            m.ts_event,
+            m.price,
+            m.size,
+            row_number() OVER (PARTITION BY m.instrument_id, floor(m.ts_event / $3) * $3 ORDER BY m.ts_event ASC) AS first_row,
+            row_number() OVER (PARTITION BY m.instrument_id, floor(m.ts_event / $3) * $3 ORDER BY m.ts_event DESC) AS last_row
+          FROM mbp m
+          INNER JOIN instrument i ON m.instrument_id = i.id
+          WHERE m.ts_event BETWEEN $1 AND $2
+          AND i.ticker = ANY($4)
+        ),
+        aggregated_data AS (
+          SELECT
+            instrument_id,
+            floor(ts_event / $3) * $3 AS ts_event, -- Maintain nanoseconds
+            MIN(price) FILTER (WHERE first_row = 1) AS open,
+            MIN(price) FILTER (WHERE last_row = 1) AS close,
+            MIN(price) AS low,
+            MAX(price) AS high,
+            SUM(size) AS volume
+          FROM ordered_data
+          GROUP BY
+            instrument_id,
+            floor(ts_event / $3) * $3
+        )
+        SELECT
+          a.instrument_id,
+          CAST(a.ts_event AS BIGINT), -- Keep as nanoseconds
+          a.open,
+          a.close,
+          a.low,
+          a.high,
+          a.volume,
+          i.ticker
+        FROM aggregated_data a
+        INNER JOIN instrument i ON a.instrument_id = i.id
+        ORDER BY a.ts_event
+        "#
         )
         .bind(params.start_ts as i64)
         .bind(end_ts)
@@ -440,7 +431,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562) },
                 price: 6870,
                 size: 2,
                 action: Action::Add as c_char,
@@ -590,6 +581,26 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092562) },
+                price: 500,
+                size: 1,
+                action: 1,
+                side: 2,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1704209103644092564,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+            Mbp1Msg {
                 hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
                 price: 6770,
                 size: 1,
@@ -610,7 +621,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1709209107644092565) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562) },
                 price: 6870,
                 size: 2,
                 action: 1,
@@ -641,11 +652,11 @@ mod test {
             symbols: vec!["AAPL".to_string()],
             start_ts: 1704209103644092563,
             end_ts: 1704209903644092570,
-            schema: String::from("ohlcv-1s"),
+            schema: String::from("ohlcv-1d"),
         };
 
         let (result, _hash_map) =
-            OhlcvMsg::retrieve_query(&pool, &mut query_params, 86400000000000)
+            OhlcvMsg::retrieve_query(&pool, &mut query_params, 86_400_000_000_000)
                 .await
                 .expect("Error on retrieve records.");
 
