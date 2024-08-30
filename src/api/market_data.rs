@@ -138,7 +138,7 @@ pub async fn get_records(
                 }
             };
 
-            if records.is_empty() {
+            if clone_params.start_ts >= clone_params.end_ts{
                 break;
             }
 
@@ -172,9 +172,6 @@ pub async fn get_records(
 
         println!("Finished streaming all batches");
     };
-
-    println!("Below the stream loop");
-
     StreamBody::new(bytes_stream)
 }
 
