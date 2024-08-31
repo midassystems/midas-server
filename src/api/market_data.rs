@@ -1,6 +1,7 @@
 use crate::database::market_data::{RecordInsertQueries, RecordRetrieveQueries, RetrieveParams};
 use crate::mbn::decode::decoder_from_file;
 use crate::mbn::record_enum::RecordEnum;
+use crate::mbn::symbols::SymbolMap;
 use crate::response::ApiResponse;
 use crate::{Error, Result};
 use async_stream::stream;
@@ -127,6 +128,7 @@ pub async fn get_records(
         let mut buffer = Vec::new();
         let mut metadata_sent = false;
         let mut clone_params = params.clone();
+        let mut accumulated_symbol_map = SymbolMap::new();
 
         loop {
             let (records, map) = match RecordEnum::retrieve_query(&pool, &mut clone_params, BATCH_SIZE).await {
@@ -137,10 +139,11 @@ pub async fn get_records(
                     return;
                 }
             };
+            // Merge the new symbol map with the accumulated one
+            accumulated_symbol_map.merge(&map);
 
-            if clone_params.start_ts >= clone_params.end_ts{
-                break;
-            }
+            if accumulated_symbol_map.map.keys().len() == params.symbols.len(){
+
 
             {
                 let mut encoder = CombinedEncoder::new(&mut buffer);
@@ -168,6 +171,11 @@ pub async fn get_records(
 
             println!("Sending buffer, currently: {:?}", buffer);
             yield Ok::<Bytes, Error>(batch_bytes);
+
+            }
+            if clone_params.start_ts >= clone_params.end_ts{
+                break;
+            }
         }
 
         println!("Finished streaming all batches");

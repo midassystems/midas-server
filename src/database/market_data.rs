@@ -52,15 +52,17 @@ impl RetrieveParams {
     }
 
     fn interval_adjust_ts(&self, ts: i64, interval_ns: i64) -> Result<i64> {
-        if ts % interval_ns == 0 {
-            Ok(ts)
-        } else {
-            let fractional_part = (ts as f64 / interval_ns as f64).fract();
-            let offset_ns = (fractional_part * interval_ns as f64) as i64;
-            let new_ts = ts - offset_ns;
-            Ok(new_ts)
-        }
+        Ok(ts - (ts % interval_ns))
     }
+    // if ts % interval_ns == 0 {
+    //     Ok(ts)
+    // } else {
+    //     let fractional_part = (ts as f64 / interval_ns as f64).fract();
+    //     let offset_ns = (fractional_part * interval_ns as f64) as i64;
+    //     let new_ts = ts - offset_ns;
+    //     Ok(new_ts)
+    // }
+    // }
 
     fn batch_interval(&mut self, interval_ns: i64, batch_size: i64) -> Result<i64> {
         // Adjust start timestamp
@@ -198,7 +200,7 @@ impl RecordRetrieveQueries for Mbp1Msg {
             .await?;
 
         // Update start
-        params.start_ts = end_ts;
+        params.start_ts = end_ts + 1;
 
         let mut records = Vec::new();
         let mut symbol_map = SymbolMap::new();
@@ -265,20 +267,21 @@ impl RecordRetrieveQueries for OhlcvMsg {
         WITH ordered_data AS (
           SELECT
             m.instrument_id,
-            m.ts_event,
+            m.ts_recv,
             m.price,
             m.size,
-            row_number() OVER (PARTITION BY m.instrument_id, floor(m.ts_event / $3) * $3 ORDER BY m.ts_event ASC) AS first_row,
-            row_number() OVER (PARTITION BY m.instrument_id, floor(m.ts_event / $3) * $3 ORDER BY m.ts_event DESC) AS last_row
+            row_number() OVER (PARTITION BY m.instrument_id, floor(m.ts_recv / $3) * $3 ORDER BY m.ts_recv ASC,  m.ctid ASC) AS first_row,
+            row_number() OVER (PARTITION BY m.instrument_id, floor(m.ts_recv / $3) * $3 ORDER BY m.ts_recv DESC, m.ctid DESC) AS last_row
           FROM mbp m
           INNER JOIN instrument i ON m.instrument_id = i.id
-          WHERE m.ts_event BETWEEN $1 AND $2
+          WHERE m.ts_recv BETWEEN $1 AND $2
           AND i.ticker = ANY($4)
+          AND m.action = 84  -- Filter only trades where action is 'T' (ASCII 84)
         ),
         aggregated_data AS (
           SELECT
             instrument_id,
-            floor(ts_event / $3) * $3 AS ts_event, -- Maintain nanoseconds
+            floor(ts_recv / $3) * $3 AS ts_event, -- Maintain nanoseconds
             MIN(price) FILTER (WHERE first_row = 1) AS open,
             MIN(price) FILTER (WHERE last_row = 1) AS close,
             MIN(price) AS low,
@@ -287,7 +290,7 @@ impl RecordRetrieveQueries for OhlcvMsg {
           FROM ordered_data
           GROUP BY
             instrument_id,
-            floor(ts_event / $3) * $3
+            floor(ts_recv / $3) * $3
         )
         SELECT
           a.instrument_id,
@@ -304,7 +307,7 @@ impl RecordRetrieveQueries for OhlcvMsg {
         "#
         )
         .bind(params.start_ts as i64)
-        .bind(end_ts)
+        .bind(end_ts - 1)
         .bind(interval_ns)
         .bind(&symbol_array)
         .fetch_all(pool)
