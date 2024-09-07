@@ -54,15 +54,6 @@ impl RetrieveParams {
     fn interval_adjust_ts(&self, ts: i64, interval_ns: i64) -> Result<i64> {
         Ok(ts - (ts % interval_ns))
     }
-    // if ts % interval_ns == 0 {
-    //     Ok(ts)
-    // } else {
-    //     let fractional_part = (ts as f64 / interval_ns as f64).fract();
-    //     let offset_ns = (fractional_part * interval_ns as f64) as i64;
-    //     let new_ts = ts - offset_ns;
-    //     Ok(new_ts)
-    // }
-    // }
 
     fn batch_interval(&mut self, interval_ns: i64, batch_size: i64) -> Result<i64> {
         // Adjust start timestamp
@@ -186,7 +177,7 @@ impl RecordRetrieveQueries for Mbp1Msg {
             FROM mbp m
             INNER JOIN instrument i ON m.instrument_id = i.id
             LEFT JOIN bid_ask b ON m.id = b.mbp_id AND b.depth = 0
-            WHERE m.ts_event BETWEEN $1 AND $2
+            WHERE m.ts_recv BETWEEN $1 AND $2
             AND i.ticker = ANY($3)
             ORDER BY m.ts_event
         "#;
@@ -587,11 +578,11 @@ mod test {
                 hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092562) },
                 price: 500,
                 size: 1,
-                action: 1,
-                side: 2,
+                action: Action::Trade as c_char,
+                side: Side::Bid as c_char,
                 depth: 0,
                 flags: 0,
-                ts_recv: 1704209103644092564,
+                ts_recv: 1704209103644092562,
                 ts_in_delta: 17493,
                 sequence: 739763,
                 levels: [BidAskPair {
@@ -607,11 +598,11 @@ mod test {
                 hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
                 price: 6770,
                 size: 1,
-                action: 1,
+                action: Action::Trade as c_char,
                 side: 2,
                 depth: 0,
                 flags: 0,
-                ts_recv: 1704209103644092564,
+                ts_recv: 1704209104645092564,
                 ts_in_delta: 17493,
                 sequence: 739763,
                 levels: [BidAskPair {
@@ -627,11 +618,11 @@ mod test {
                 hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562) },
                 price: 6870,
                 size: 2,
-                action: 1,
+                action: Action::Trade as c_char,
                 side: 2,
                 depth: 0,
                 flags: 0,
-                ts_recv: 1704209103644092565,
+                ts_recv: 1704295503644092562,
                 ts_in_delta: 17493,
                 sequence: 739763,
                 levels: [BidAskPair {
@@ -653,8 +644,8 @@ mod test {
         // Test
         let mut query_params = RetrieveParams {
             symbols: vec!["AAPL".to_string()],
-            start_ts: 1704209103644092563,
-            end_ts: 1704209903644092570,
+            start_ts: 1704209103644092562,
+            end_ts: 1704295503654092563,
             schema: String::from("ohlcv-1d"),
         };
 
