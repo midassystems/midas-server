@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS mbp (
     FOREIGN KEY(instrument_id) 
       REFERENCES instrument(id)
       ON DELETE CASCADE,
-  CONSTRAINT unique_instrument_ts_sequence_event UNIQUE (instrument_id, ts_event, price, size, flags, sequence, order_book_hash)
+  CONSTRAINT unique_instrument_ts_sequence_event UNIQUE (instrument_id, ts_event, price, size, flags, sequence, order_book_hash, ts_recv, action, side)
 );
 
 CREATE TABLE IF NOT EXISTS bid_ask (
