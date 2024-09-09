@@ -61,61 +61,68 @@ pub async fn create_record(
 pub async fn bulk_upload(
     Extension(pool): Extension<PgPool>,
     Json(file_name): Json<String>,
-) -> Result<ApiResponse<()>> {
+) -> impl IntoResponse {
     const BATCH_SIZE: usize = 5000;
 
-    // Construct the full file path
     let bulk_data_dir = "/app/bulk_data/";
     let file_path = Path::new(bulk_data_dir).join(file_name);
-    let file_path_str = file_path
-        .to_str()
-        .ok_or_else(|| Error::CustomError("Error converting file path to string".to_string()))?;
+    let file_path_str = match file_path.to_str() {
+        Some(path) => path.to_string(),
+        None => return Err(Error::CustomError("Invalid file path".to_string())),
+    };
 
-    // Decode binary file
-    let mut records_in_batch = 0;
-    let mut tx = pool.begin().await?;
+    info!("File found, preparing to stream load data.");
 
-    let mut decoder = decoder_from_file(&file_path_str)?;
-    let mut decode_iter = decoder.decode_iterator();
-    while let Some(record_result) = decode_iter.next() {
-        // info!("Record {:?}", records_in_batch);
-        // info!("Record {:?}", record_result);
-        match record_result {
-            Ok(record) => {
-                match record {
-                    RecordEnum::Mbp1(msg) => {
-                        msg.insert_query(&mut tx).await?;
-                        records_in_batch += 1;
+    // Create a stream to send updates
+    let progress_stream = stream! {
+        let mut records_in_batch = 0;
+        let mut tx = pool.begin().await?;
+        let mut decoder = decoder_from_file(&file_path_str)?;
+        let mut decode_iter = decoder.decode_iterator();
+
+        while let Some(record_result) = decode_iter.next() {
+            match record_result {
+                Ok(record) => {
+                    match record {
+                        RecordEnum::Mbp1(msg) => {
+                            msg.insert_query(&mut tx).await?;
+                            records_in_batch += 1;
+                        }
+                        _ => unimplemented!(),
                     }
-                    _ => unimplemented!(),
+
+                    if records_in_batch >= BATCH_SIZE {
+                        info!("Committing batch of records.");
+                        tx.commit().await?;
+                        tx = pool.begin().await?;
+                        let processed_records = records_in_batch.clone();
+                        records_in_batch = 0; // Reset batch counter
+
+                        // Yield progress update
+                        yield Ok::<Bytes, Error>(Bytes::from(format!("Processed {} records.", processed_records)));
+                    }
                 }
-                if records_in_batch >= BATCH_SIZE {
-                    info!("Committing batch of records.");
-                    tx.commit().await?;
-                    tx = pool.begin().await?;
-                    records_in_batch = 0; // Reset batch counter
+                Err(e) => {
+                    yield Err(Error::CustomError(format!(
+                        "Failed to decode record: {}",
+                        e
+                    )));
+                    return;
                 }
-            }
-            Err(e) => {
-                return Err(Error::CustomError(format!(
-                    "Failed to decode record: {}",
-                    e
-                )));
             }
         }
-    }
 
-    // Commit any remaining records in the last batch
-    if records_in_batch > 0 {
-        tx.commit().await?;
-    }
+        // Commit remaining records
+        if records_in_batch > 0 {
+            tx.commit().await?;
+            yield Ok(Bytes::from("Final batch committed."));
+        }
 
-    Ok(ApiResponse::new(
-        "success",
-        "Successfully inserted records.",
-        StatusCode::OK,
-        None,
-    ))
+        yield Ok(Bytes::from("Bulk upload completed."));
+    };
+
+    // Return the stream
+    Ok(StreamBody::new(progress_stream))
 }
 
 pub async fn get_records(
