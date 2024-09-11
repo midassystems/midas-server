@@ -81,6 +81,7 @@ pub async fn bulk_upload(
         let mut decode_iter = decoder.decode_iterator();
 
         while let Some(record_result) = decode_iter.next() {
+            // info!("Record {:?}", record_result); // uncomment when debugging
             match record_result {
                 Ok(record) => {
                     match record {
@@ -129,7 +130,7 @@ pub async fn get_records(
     Extension(pool): Extension<PgPool>,
     Json(params): Json<RetrieveParams>,
 ) -> impl IntoResponse {
-    const BATCH_SIZE: i64 = 86400000000000; // One day in nanoseconds
+    const BATCH_SIZE: i64 = 86400000000000 * 7; // One day in nanoseconds
 
     let bytes_stream = stream! {
         let mut buffer = Vec::new();
@@ -176,7 +177,7 @@ pub async fn get_records(
             let batch_bytes = Bytes::from(buffer.clone());
             buffer.clear();
 
-            println!("Sending buffer, currently: {:?}", buffer);
+            info!("Sending buffer, currently: {:?}", buffer);
             yield Ok::<Bytes, Error>(batch_bytes);
 
             }
@@ -185,7 +186,7 @@ pub async fn get_records(
             }
         }
 
-        println!("Finished streaming all batches");
+        info!("Finished streaming all batches");
     };
     StreamBody::new(bytes_stream)
 }
