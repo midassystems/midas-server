@@ -99,14 +99,15 @@ impl ParametersQueries for Parameters {
     ) -> Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO Parameters (backtest_id, strategy_name, capital, data_type, train_start, train_end, test_start, test_end, tickers)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO Parameters (backtest_id, strategy_name, capital, data_type,schema, train_start, train_end, test_start, test_end, tickers)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             "#
         )
         .bind(&backtest_id)
         .bind(&self.strategy_name)
         .bind(&self.capital)
         .bind(&self.data_type)
+        .bind(&self.schema)
         .bind(&self.train_start)
         .bind(&self.train_end)
         .bind(&self.test_start)
@@ -120,7 +121,7 @@ impl ParametersQueries for Parameters {
     async fn retrieve_query(pool: &PgPool, backtest_id: i32) -> Result<Self> {
         let result : Parameters = sqlx::query_as(
             r#"
-            SELECT strategy_name, capital, data_type, train_start, train_end, test_start, test_end, tickers
+            SELECT strategy_name, capital, data_type, schema, train_start, train_end, test_start, test_end, tickers
             FROM Parameters
             WHERE backtest_id = $1
             "#
