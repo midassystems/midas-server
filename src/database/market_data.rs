@@ -60,7 +60,12 @@ impl RetrieveParams {
         self.start_ts = self.interval_adjust_ts(self.start_ts, interval_ns)?;
         let calculated_end_ts = self.start_ts + batch_size;
 
-        Ok(calculated_end_ts)
+        // If the calculated end_ts exceeds the requested end_ts, use the requested end_ts
+        if calculated_end_ts > self.end_ts {
+            Ok(self.end_ts) // Ensure we do not go beyond the true end_ts
+        } else {
+            Ok(calculated_end_ts)
+        }
     }
 }
 
@@ -161,11 +166,7 @@ impl RecordRetrieveQueries for Mbp1Msg {
     ) -> Result<(Vec<Self>, SymbolMap)> {
         // Batch timestamps
         let interval_ns = params.schema_interval()?;
-        let mut end_ts = params.batch_interval(interval_ns, batch)?;
-        // Make sure end_ts isn't exceeding requested
-        if end_ts > params.end_ts {
-            end_ts = params.end_ts;
-        }
+        let end_ts = params.batch_interval(interval_ns, batch)?;
 
         // Convert the Vec<String> symbols to an array for binding
         let symbol_array: Vec<&str> = params.symbols.iter().map(AsRef::as_ref).collect();
