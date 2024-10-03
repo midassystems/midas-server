@@ -1,0 +1,14 @@
+[
+  {
+    "ticker": "HE.n.0",
+    "name": "lean hogs",
+    "stype": "continuous",
+    "dataset": "GLBX.MDP3"
+  },
+  {
+    "ticker": "ZC.n.0",
+    "name": "corn",
+    "stype": "continuous",
+    "dataset": "GLBX.MDP3"
+  }
+]
