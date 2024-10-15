@@ -1,0 +1,89 @@
+
+"static_stats": [{
+    "net_profit": 330.0, 
+    "total_fees": 40.0, 
+    "ending_equity": 1330.0, 
+    "avg_trade_profit": 165.0, 
+    "total_return": 0.33, 
+    "annual_standard_deviation_percentage": 0.23, 
+    "max_drawdown_percentage": 0.0, 
+    "avg_win_percentage": 0.45, 
+    "avg_loss_percentage": 0, 
+    "percent_profitable": 1.0, 
+    "total_trades": 2, 
+    "number_winning_trades": 2, 
+    "number_losing_trades": 0, 
+    "profit_and_loss_ratio": 0.0,  
+    "profit_factor": 0.0, 
+    "sortino_ratio": 0.0,
+    "sharpe_ratio": 10.72015,
+}],
+"period_timeseries_stats": [
+    {
+        "timestamp": 1704903000,
+        "equity_value": 10000.0,
+        "percent_drawdown": 9.9, 
+        "cumulative_return": -0.09, 
+        "period_return": 79.9,
+        "daily_strategy_return": "0.330", 
+        "daily_benchmark_return": "0.00499"
+    },
+    {
+        "timestamp": 1704904000,
+        "equity_value": 10000.0,
+        "percent_drawdown": 9.9, 
+        "cumulative_return": -0.09, 
+        "period_return": 79.9,
+        "daily_strategy_return": "0.087", 
+        "daily_benchmark_return": "0.009"
+    }
+],
+"daily_timeseries_stats": [
+    {
+        "timestamp": 1704903000,
+        "equity_value": 10000.0,
+        "percent_drawdown": 9.9, 
+        "cumulative_return": -0.09, 
+        "period_return": 79.9,
+        "daily_strategy_return": "0.330", 
+        "daily_benchmark_return": "0.00499"
+    },
+    {
+        "timestamp": 1704904000,
+        "equity_value": 10000.0,
+        "percent_drawdown": 9.9, 
+        "cumulative_return": -0.09, 
+        "period_return": 79.9,
+        "daily_strategy_return": "0.087", 
+        "daily_benchmark_return": "0.009"
+    }
+],
+"trades": [{
+    "trade_id": 1, 
+        "leg_id": 1, 
+        "timestamp": 1704903000, 
+        "ticker": "AAPL", 
+        "quantity": 4, 
+        "avg_price": 130.74, 
+        "trade_value": -522.96, 
+        "action": "BUY", 
+        "fees": 0.0
+}],
+"signals": [{
+    "timestamp": 1704903000, 
+    "trade_instructions": [{
+        "ticker": "AAPL", 
+        "action": "BUY", 
+        "trade_id": 1, 
+        "leg_id": 1, 
+        "weight": 0.05
+    }, 
+    {
+        "ticker": "MSFT", 
+        "action": "SELL", 
+        "trade_id": 1, 
+        "leg_id": 2, 
+        "weight": 0.05 
+    }]
+}]
+

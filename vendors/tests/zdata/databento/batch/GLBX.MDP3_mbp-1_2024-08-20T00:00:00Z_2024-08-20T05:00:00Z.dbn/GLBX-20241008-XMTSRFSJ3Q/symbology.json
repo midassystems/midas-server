@@ -1,0 +1,30 @@
+{
+    "result": {
+        "ZC.n.0": [
+            {
+                "d0": "2024-08-20",
+                "d1": "2024-08-21",
+                "s": "487769"
+            }
+        ],
+        "HE.n.0": [
+            {
+                "d0": "2024-08-20",
+                "d1": "2024-08-21",
+                "s": "5747"
+            }
+        ]
+    },
+    "symbols": [
+        "HE.n.0",
+        "ZC.n.0"
+    ],
+    "stype_in": "continuous",
+    "stype_out": "instrument_id",
+    "start_date": "2024-08-20",
+    "end_date": "2024-08-21",
+    "partial": [],
+    "not_found": [],
+    "message": "OK",
+    "status": 0
+}
