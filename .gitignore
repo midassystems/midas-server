@@ -4,7 +4,9 @@
 /venv
 logs.log
 /bulk_data
-/logs
+# /logs
 deploy.txt
+*.bin
 
+sql_commands.txt
 

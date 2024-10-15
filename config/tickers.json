@@ -1,0 +1,10 @@
+{
+  "databento": [
+    {
+      "ticker": "ZM.n.0",
+      "name": "soybean meal",
+      "stype": "continuous",
+      "dataset": "GLBX.MDP3"
+    }
+  ]
+}

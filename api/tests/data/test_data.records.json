@@ -1,0 +1,28 @@
+[
+  {
+    "ts_recv":  1704209103644092564,
+    "ts_event":1704209103644092564,
+    "publisher_id": 1,
+    "instrument_id": 275, 
+    "action": F,
+    "side": B,
+    "price": 67.70,
+    "size": 1,
+    "flags": 0,
+    "ts_in_delta": 17493, 
+    "sequence": 739763
+  },
+  {
+    "ts_recv":  1704209103644092564,
+    "ts_event":1704209103644092564,
+    "publisher_id": 1,
+    "instrument_id": 275, 
+    "action": "F",
+    "side": "A",
+    "price": 68.70,
+    "size": 2,
+    "flags": 0,
+    "ts_in_delta": 17493, 
+    "sequence": 739763
+  }
+]
