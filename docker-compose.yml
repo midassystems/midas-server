@@ -1,66 +1,127 @@
 services:
+  host_setup:
+    profiles:
+      - production
+    volumes:
+      - scripts:/scripts  # Just bind the scripts volume
+    command: ["./scripts/host-setup.sh"]  # Run your setup script from the volume
+    
+  # Single PostgreSQL service hosting both databases
+  postgres:
+    image: postgres:14
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    profiles:
+      - dev
+      - database
+      - testing
+      - production  # API should run in both dev and production
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ${SCRIPTS_DIR}/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+    networks:
+      - app-network
+
+  historical-database:
+    build:
+      context: .
+      dockerfile: ./database/historical/Dockerfile
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      HISTORICAL_DATABASE_URL: ${HISTORICAL_DATABASE_URL}
+    depends_on:
+      - postgres  # Wait for the database to be ready
+    command: ["/app/scripts/migrate-db.sh", "historical"]
+    networks:
+      - app-network
+
+  # Actual api service
+  historical-service: 
+    build:
+      context: .
+      dockerfile: "./services/historical/Dockerfile"
+    environment:
+      HISTORICAL_DATABASE_URL: ${HISTORICAL_DATABASE_URL} 
+      HISTORICAL_PORT: ${HISTORICAL_PORT}
+      LOG_FILE: /app/logs/historical.log
+      LOG_LEVEL: info
+    profiles:
+      - dev
+      - testing
+      - database
+      - production  # API should run in both dev and production
+    depends_on:
+      - historical-database
+    ports:
+      - "${HISTORICAL_PORT}:${HISTORICAL_PORT}"  
+    volumes:
+      - data:/app/data
+      - logs:/app/logs
+      - scripts:/app/scripts
+    command: ["./midas-historical"]
+    networks:
+      - app-network 
+
+  trading-database:
+    build:
+      context: .
+      dockerfile: ./database/trading/Dockerfile
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TRADING_DATABASE_URL: ${TRADING_DATABASE_URL}
+    depends_on:
+      - postgres  # Wait for the database to be ready
+    command: ["/app/scripts/migrate-db.sh", "trading"]
+    networks:
+      - app-network
+
+
+  # Actual api service
+  trading-service: 
+    build:
+      context: .
+      dockerfile: "./services/trading/Dockerfile"
+    environment:
+      TRADING_DATABASE_URL: ${TRADING_DATABASE_URL}
+      TRADING_PORT: ${TRADING_PORT}
+      LOG_FILE: /app/logs/trading.log
+      LOG_LEVEL: info
+    profiles:
+      - dev
+      - testing
+      - database
+      - production  # API should run in both dev and production
+    depends_on:
+      - trading-database
+    ports:
+      - "${TRADING_PORT}:${TRADING_PORT}"  
+    volumes:
+      - data:/app/data
+      - logs:/app/logs
+      - scripts:/app/scripts
+    command: ["./midas-trading"]
+    networks:
+      - app-network
+
+
+  # Admin for updating etc 
   manager:
     build:
       context: .
       dockerfile: "./cli/Dockerfile"
     environment:
-      MIDAS_URL: http://api:8080
-      LOG_FILE: /app/logs/manager.log
-    env_file:
-      - .env  # Reference the local .env file
+      MIDAS_URL: http://historical-service:${HISTORICAL_PORT}
+    profiles:
+      - testing
+      - production  
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./config:/app/config
-    networks:
-      - app-network
-
- # Single PostgreSQL service hosting both databases
-  postgres:
-    image: postgres:14
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - app-network
-
-  # Application service for market data
-  database:
-    build:
-      context: .  # Include the entire project as context
-      dockerfile: ./database/Dockerfile
-    environment:
-      POSTGRES_USER: postgres        # Add this
-      POSTGRES_PASSWORD: password    # Add this
-      MARKET_DATABASE_URL: postgres://postgres:password@postgres:5432/market_data
-      TRADING_DATABASE_URL: postgres://postgres:password@postgres:5432/trading_data
-      LOG_FILE: /app/logs/database.log
-    depends_on:
-      - postgres  # Wait for the database to be ready
-    volumes:
-      - ./logs:/app/logs
-    command: ./scripts/init-db.sh
-    networks:
-      - app-network
-
-  api: 
-    build:
-      context: .
-      dockerfile: "./api/Dockerfile"
-    environment:
-      MARKET_DATABASE_URL: postgres://postgres:password@postgres:5432/market_data
-      TRADING_DATABASE_URL: postgres://postgres:password@postgres:5432/trading_data
-      API_LOG_FILE: /app/logs/api.log
-    depends_on:
-      - postgres
-    ports:
-      - "8080:8080"  # Expose the app port to the host
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-    command: ["./midas-api"]
+      - data:/app/data
+      - ${BIN_DIR}:/usr/local/bin  # Mount host's bin directory
+      - ${LIB_DIR}:/usr/local/lib  # Mount host's lib directory
+    command: ["./app/scripts/build-manager.sh"]
     networks:
       - app-network
 
@@ -69,8 +130,80 @@ networks:
     driver: bridge
 
 volumes:
+  logs:
+    driver: local
+    driver_opts:
+      o: bind
+      type: none
+      device: ${LOG_DIR}  # Centralized log directory
+  data:
+    driver: local
+    driver_opts:
+      o: bind
+      type: none
+      device: ${DATA_DIR}  # Centralized data directory
+  scripts:
+    driver: local
+    driver_opts:
+      o: bind
+      type: none
+      device: ${SCRIPTS_DIR}
   postgres_data:
 
 
 
 
+  # Sets up the database
+  # database:
+  #   build:
+  #     context: .  # Include the entire project as context
+  #     dockerfile: ./database/Dockerfile
+  #   environment:
+  #     POSTGRES_USER: ${POSTGRES_USER}       
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}    
+  #     MARKET_DATABASE_URL: ${MARKET_DATABASE_URL} 
+  #     TRADING_DATABASE_URL: ${TRADING_DATABASE_URL} 
+  #   profiles:
+  #     - dev
+  #     - testing
+  #     - production  # API should run in both dev and production
+  #   depends_on:
+  #     - postgres  # Wait for the database to be ready
+  #   command: ["./scripts/init-db.sh"]
+  #   networks:
+  #     - app-network
+  #     
+  #   # Health check to ensure the init-db.sh script completes
+  #   # Custom health check to ensure the database URLs are accessible
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -d $MARKET_DATABASE_URL && pg_isready -d $TRADING_DATABASE_URL"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 40s
+
+  # # Actual api service
+  # api: 
+  #   build:
+  #     context: .
+  #     dockerfile: "./api/Dockerfile"
+  #   environment:
+  #     MARKET_DATABASE_URL: ${MARKET_DATABASE_URL} 
+  #     TRADING_DATABASE_URL: ${TRADING_DATABASE_URL}
+  #     API_LOG_FILE: /app/logs/api.log
+  #   profiles:
+  #     - dev
+  #     - testing
+  #     - production  # API should run in both dev and production
+  #   depends_on:
+  #     database:
+  #       condition: service_healthy  # Wait for database to be healthy
+  #   ports:
+  #     - "${PORT}:8080"  
+  #   volumes:
+  #     - data:/app/data
+  #     - logs:/app/logs
+  #     - scripts:/app/scripts
+  #   command: ["./midas-api"]
+  #   networks:
+  #     - app-network

@@ -3,11 +3,12 @@ use crate::error::{Error, Result};
 use async_trait::async_trait;
 use clap::{Args, Subcommand};
 use databento::dbn::Schema;
-use midas_client::client::ApiClient;
+use midas_client::historical::Historical;
 use std::path::PathBuf;
 use std::str::FromStr;
 use time::Duration;
 use time::{format_description::well_known::Rfc3339, macros::time, OffsetDateTime};
+use vendors::databento::client::DatabentoDownloadType;
 
 fn process_start_date(start: &String) -> Result<OffsetDateTime> {
     // Append T00:00 to make it full day at 00:00 UTC
@@ -53,36 +54,15 @@ pub struct DatabentoArgs {
 pub enum DatabentoCommands {
     /// Standard update, adds mbp for tickers already in the database for entire previous day.
     Update {
-        #[arg(long, default_value = "config/tickers.json")]
-        file_path: String,
+        #[arg(long, default_value = "data/tickers.json")]
+        tickers_filepath: String,
     },
-    /// Update tickers already in the database on a custom timeframe.
-    BulkUpdate {
-        #[arg(long, default_value = "config/update_tickers.json")]
-        file_path: String,
-        #[arg(long)]
-        start: String,
-        #[arg(long)]
-        end: Option<String>,
-    },
-    /// Adds tickers and backfills histroical data to desired date.
-    Add {
-        #[arg(long, default_value = "config/add_tickers.json")]
-        file_path: String,
-        #[arg(long)]
-        start: String,
-        #[arg(long)]
-        end: Option<String>,
-    },
-    /// Compare files
-    Compare {
-        #[arg(long)]
-        dbn_filepath: String,
-        #[arg(long)]
-        mbn_filepath: String,
-    },
-    // To  file(mainly for testing for schemas not stored)
-    ToFile {
+    /// Download databento data to file
+    Download {
+        /// --tickers AAPL GOOGL TSLA
+        #[arg(num_args(0..))]
+        tickers: Vec<String>,
+
         /// Start date in YYYY-MM-DD HH:MM:SS format.
         #[arg(long)]
         start: String,
@@ -95,91 +75,65 @@ pub enum DatabentoCommands {
         #[arg(long)]
         schema: String,
 
+        /// Start date in YYYY-MM-DD HH:MM:SS format.
+        #[arg(long)]
+        dataset: String,
+
+        /// End date in YYYY-MM-DD HH:MM:SS format.
+        #[arg(long)]
+        stype: String,
+    },
+    /// Upload a databento file to database
+    Upload {
+        /// Schema ex. Mbp1, Ohlcv
+        #[arg(long)]
+        dbn_filepath: String,
+
+        /// End date in YYYY-MM-DD HH:MM:SS format.
+        #[arg(long)]
+        dbn_downloadtype: String,
+
+        /// Schema ex. Mbp1, Ohlcv
+        #[arg(long, default_value = "data/tickers.json")]
+        tickers_filepath: String,
+
         /// File path to save the downloaded binary data.
         #[arg(long)]
-        file_path: String,
+        mbn_filepath: String,
+    },
+    /// Compare databento and midas data
+    Compare {
+        #[arg(long)]
+        dbn_filepath: String,
+        #[arg(long)]
+        mbn_filepath: String,
     },
 }
 
 #[async_trait]
 impl ProcessCommand for DatabentoCommands {
-    async fn process_command(&self, client: &ApiClient) -> Result<()> {
+    async fn process_command(&self, client: &Historical) -> Result<()> {
         // Ensure the client is available
         match self {
-            DatabentoCommands::Update { file_path } => {
+            DatabentoCommands::Update { tickers_filepath } => {
                 let now = OffsetDateTime::now_utc();
                 let start = (now - Duration::days(1)).replace_time(time::macros::time!(00:00));
                 let end = now.replace_time(time::macros::time!(00:00));
 
-                println!("\nUpdating Database: {:?}", now);
+                // println!("\nUpdating Database: {:?}", now);
                 println!("start {:?}, end {:?}", start, end);
-
                 // Update
-                let _ = vendors::databento::update::update(
-                    Schema::Mbp1,
-                    start,
-                    end,
-                    client,
-                    file_path,
-                    None,
-                    None,
-                )
-                .await?;
+                let _ = vendors::databento::update(tickers_filepath, client).await?;
 
                 Ok(())
             }
-            DatabentoCommands::BulkUpdate {
-                file_path,
-                start,
-                end,
-            } => {
-                let start_date = process_start_date(start)?;
-                let end_date = processs_end_date(end.clone())?;
-
-                println!("{}, {}", start_date, end_date);
-                // Update
-                let _ = vendors::databento::update::update(
-                    Schema::Mbp1,
-                    start_date,
-                    end_date,
-                    client,
-                    file_path,
-                    None,
-                    None,
-                )
-                .await?;
-
-                Ok(())
-            }
-            DatabentoCommands::Add {
-                file_path,
-                start,
-                end,
-            } => {
-                let start_date = process_start_date(start)?;
-                let end_date = processs_end_date(end.clone())?;
-
-                println!("{}, {}", start_date, end_date);
-
-                // Update
-                let _ = vendors::databento::update::update(
-                    Schema::Mbp1,
-                    start_date,
-                    end_date,
-                    client,
-                    file_path,
-                    None,
-                    None,
-                )
-                .await?;
-
-                Ok(())
-            }
-            DatabentoCommands::ToFile {
-                file_path,
+            DatabentoCommands::Download {
+                tickers,
                 start,
                 end,
                 schema,
+                dataset,
+                stype,
             } => {
                 let start_date = process_start_date(start)?;
                 let end_date = processs_end_date(Some(end.clone()))?;
@@ -187,14 +141,36 @@ impl ProcessCommand for DatabentoCommands {
                     .expect(format!("Invalid schema : {}", schema.as_str()).as_str());
 
                 println!("{}, {}", start_date, end_date);
-                // Update
-                let _ = vendors::databento::update::update(
+                // Download
+                let _ = vendors::databento::download(
+                    tickers,
                     schema_enum,
                     start_date,
                     end_date,
-                    client,
-                    file_path,
-                    Some(false),
+                    dataset,
+                    stype,
+                )
+                .await?;
+
+                Ok(())
+            }
+            DatabentoCommands::Upload {
+                dbn_filepath,
+                dbn_downloadtype,
+                tickers_filepath,
+                mbn_filepath,
+            } => {
+                let dbn_filepath = PathBuf::from(dbn_filepath);
+                let mbn_filepath = PathBuf::from(mbn_filepath);
+                let download_type = DatabentoDownloadType::try_from(dbn_downloadtype.as_str())?;
+
+                // Update
+                let _ = vendors::databento::upload(
+                    &dbn_filepath,
+                    &download_type,
+                    tickers_filepath,
+                    &mbn_filepath,
+                    &client,
                     None,
                 )
                 .await?;

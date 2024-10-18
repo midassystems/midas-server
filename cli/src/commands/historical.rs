@@ -2,8 +2,7 @@ use crate::cli::ProcessCommand;
 use crate::error::Result;
 use async_trait::async_trait;
 use clap::Args;
-use midas_client::client::ApiClient;
-use midas_client::client::RetrieveParams;
+use midas_client::historical::{Historical, RetrieveParams};
 use std::fmt::Debug;
 
 #[derive(Debug, Args)]
@@ -31,7 +30,7 @@ pub struct HistoricalArgs {
 
 #[async_trait]
 impl ProcessCommand for HistoricalArgs {
-    async fn process_command(&self, client: &ApiClient) -> Result<()> {
+    async fn process_command(&self, client: &Historical) -> Result<()> {
         // Split the symbols string into a vector of symbols
         let symbols: Vec<String> = self
             .symbols

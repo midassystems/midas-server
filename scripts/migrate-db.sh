@@ -22,10 +22,10 @@ if [ "$DATABASE" == "trading" ]; then
 	cd database/trading || exit 1
 	DATABASE_URL=$TRADING_DATABASE_URL sqlx migrate run
 	echo "Trading_data database migrated."
-elif [ "$DATABASE" == "market" ]; then
-	echo "MARKET_DATABASE_URL: $MARKET_DATABASE_URL"
-	cd database/market || exit 2
-	DATABASE_URL=$MARKET_DATABASE_URL sqlx migrate run
+elif [ "$DATABASE" == "historical" ]; then
+	echo "HISTORICAL_DATABASE_URL: $HISTORICAL_DATABASE_URL"
+	cd database/historical || exit 2
+	DATABASE_URL=$HISTORICAL_DATABASE_URL sqlx migrate run
 	echo "Market_data database migrated."
 else
 	echo "Unknown database: $DATABASE"

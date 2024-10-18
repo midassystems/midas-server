@@ -17,6 +17,7 @@ derive_more = {version = "1.0.0-beta", features = ["from"]}
 time = { version = "0.3", features = ["macros"] }
 databento = "0.14.1"
 walkdir = "2.3"
+dotenv = "0.15"  # Or the latest version
 once_cell = "1.10.0"  # or use lazy_static
 dbn = "0.22.1"
 mbn = { git = "https://github.com/anthonyb8/mbn.git", branch = "main" }

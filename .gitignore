@@ -1,12 +1,15 @@
 /target
 .env
+.env.dev
 .DS_Store
 /venv
 logs.log
-/bulk_data
-# /logs
+/data
+/logs
 deploy.txt
 *.bin
+/lib
+/bin
 
 sql_commands.txt
-
+test.sql

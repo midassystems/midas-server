@@ -45,6 +45,8 @@ pub enum Error {
     NoDataError,
     #[error("File not found: {0}")]
     FileNotFoundError(String),
+    #[error("Invalid DatabentoDownloadType")]
+    InvalidDownloadType,
 }
 
 impl Error {
