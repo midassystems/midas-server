@@ -207,7 +207,6 @@ pub async fn get_tickers(
     let mbn_map: HashMap<String, u32> = create_tickers(&active_tickers, client).await?;
 
     // Filter
-    /*  let last_update = ticker_file.last_update_datetime()?; */
     let grouped_tickers = filter_tickers(&active_tickers).await?;
 
     Ok((mbn_map, grouped_tickers))

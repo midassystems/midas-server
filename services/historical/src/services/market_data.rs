@@ -136,7 +136,6 @@ pub async fn bulk_upload(
         yield Ok(Bytes::from("Bulk upload completed."));
     };
 
-    // Return the stream
     Ok(StreamBody::new(progress_stream))
 }
 
@@ -570,7 +569,7 @@ mod test {
 
         let cursor = Cursor::new(buffer);
         let mut decoder = CombinedDecoder::new(cursor);
-        let (metadata, records) = decoder.decode().expect("Error decoding metadata.");
+        let (_metadata, records) = decoder.decode().expect("Error decoding metadata.");
 
         // Validate
         // println!("Metadata {:?}", metadata);

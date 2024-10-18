@@ -8,6 +8,11 @@ use axum::{Extension, Json, Router};
 use mbn::symbols::Instrument;
 use sqlx::PgPool;
 use tracing::{error, info};
+
+// TODO: Update time tracing
+// let span = tracing::info_span!("create_instrument", instrument_name = %instrument.name);
+//  let _enter = span.enter();
+
 // Service
 pub fn instrument_service() -> Router {
     Router::new()
@@ -17,10 +22,6 @@ pub fn instrument_service() -> Router {
         .route("/update", put(update_instrument_id))
         .route("/get", get(get_instrument))
 }
-
-// TODO: Update time tracing
-// let span = tracing::info_span!("create_instrument", instrument_name = %instrument.name);
-//  let _enter = span.enter();
 
 // Handlers
 pub async fn create_instrument(

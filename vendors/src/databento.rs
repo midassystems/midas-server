@@ -13,7 +13,6 @@ use crate::databento::{
 };
 use crate::error::{Error, Result};
 use crate::tickers::get_tickers;
-// use crate::{PROCESSED_DIR, RAW_DIR};
 use databento::dbn::{Dataset, SType, Schema};
 use midas_client::historical::Historical;
 use std::collections::HashMap;
@@ -41,8 +40,6 @@ pub async fn update(tickers_filepath: &str, client: &Historical) -> Result<()> {
             download(&tickers, Schema::Mbp1, start, end, &dataset, &stype).await?;
 
         // Mbn file path
-        // let mbn_dir = &PathBuf::from(&*MBN_DATA_DIR);
-        // let mbn_filepath = mbn_dir.join(&mbn_file_name);
         let mbn_filename = PathBuf::from(format!(
             "{}_{}_{}_{}.bin",
             dataset,
@@ -107,7 +104,7 @@ pub async fn upload(
 ) -> Result<()> {
     // If mbn_map is provided, use it; otherwise, fetch it asynchronously
     let mbn_map = if let Some(map) = mbn_map {
-        map.clone() // Use the provided map
+        map.clone()
     } else {
         // Fetch mbn_map if it's not provided
         let (mbn_map, _) = get_tickers(tickers_filepath, "databento", client).await?;
@@ -160,7 +157,6 @@ pub async fn etl_pipeline(
 mod tests {
     use super::*;
     use dotenv::dotenv;
-    use serial_test::serial;
     use std::env;
     use time::OffsetDateTime;
 
