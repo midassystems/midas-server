@@ -284,6 +284,7 @@ impl RecordsQuery for TradeMsg {
 
 }
 
+
 impl FromRow for TradeMsg {
     fn from_row(row: &sqlx::postgres::PgRow) -> Result<Self> {
         Ok(TradeMsg {

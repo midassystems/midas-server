@@ -4,7 +4,7 @@ use cli::{
     Result,
 };
 use midas_client::historical::Historical;
-use std::env;
+// use std::env;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -12,7 +12,7 @@ async fn main() -> Result<()> {
     let args = CliArgs::parse();
 
     // Initialize the MidasClient, which holds the ApiClient
-    let historic_url = env::var("HISTORICAL_URL").expect("HISTORICAL_URL not set");
+    let historic_url = std::env::var("HISTORICAL_URL").expect("HISTORICAL_URL not set");
     let historical_client = Historical::new(&historic_url);
 
     // Process the command and pass the ApiClient to it

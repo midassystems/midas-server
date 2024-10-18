@@ -4,7 +4,6 @@ FROM rust:1.78 AS builder
 # Set the working directory
 WORKDIR /app
 
-
 # Copy the Cargo.toml and Cargo.lock files
 COPY Cargo.lock .
 COPY Cargo.toml .

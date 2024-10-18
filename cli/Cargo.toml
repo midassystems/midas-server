@@ -18,7 +18,7 @@ time = { version = "0.3", features = ["macros"] }
 databento = "0.14.1"
 walkdir = "2.3"
 dbn = "0.22.1"
-dotenv = "0.15"  # Or the latest version
+dotenv = "0.15"  
 vendors = {path="../vendors"}
 mbn = { git = "https://github.com/anthonyb8/mbn.git", branch = "main" }
 midas_client = { git="https://github.com/anthonyb8/midas-rs.git", branch ="main" }
@@ -27,7 +27,6 @@ midas_client = { git="https://github.com/anthonyb8/midas-rs.git", branch ="main"
 serial_test = "3.1.1"
 regex = "1.3.9"
 dotenv = {version="0.15.0"}
-# mockall = "0.11.0"
 assert_cmd = "2.0.16"
 anyhow = "1.0.86"
 once_cell = "1.10.0"  # or use lazy_static

@@ -5,7 +5,7 @@ use mbn::backtest::{
     Trades,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
-use tracing::{error, info};
+use tracing::info;
 
 #[async_trait]
 pub trait BacktestDataQueries {
