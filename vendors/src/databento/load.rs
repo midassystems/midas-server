@@ -1,9 +1,9 @@
 use crate::error::Result;
-use midas_client::client::ApiClient;
+use midas_client::historical::Historical;
 use std::path::PathBuf;
 
 /// Main function for loading data to database
-pub async fn load_file_to_db(file_name: &PathBuf, client: &ApiClient) -> Result<()> {
+pub async fn load_file_to_db(file_name: &PathBuf, client: &Historical) -> Result<()> {
     // Convert PathBuf to String
     let path_string: String = file_name.to_string_lossy().into_owned();
 
@@ -45,7 +45,7 @@ mod tests {
     // #[ignore]
     async fn test_load_file_to_db() -> Result<()> {
         let base_url = "http://localhost:8080"; // Update with your actual base URL
-        let client = ApiClient::new(base_url);
+        let client = Historical::new(base_url);
 
         // Create Instruments
         let (mbn_map, _grouped_tickers) =

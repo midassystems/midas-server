@@ -1,4 +1,4 @@
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::utils::user_input;
 use databento::{
     dbn::{self, Dataset, SType, Schema},
@@ -36,6 +36,18 @@ pub fn databento_file_path(
 pub enum DatabentoDownloadType {
     Stream,
     Batch,
+}
+
+impl TryFrom<&str> for DatabentoDownloadType {
+    type Error = crate::Error;
+
+    fn try_from(value: &str) -> Result<Self> {
+        match value.to_uppercase().as_str() {
+            "STREAM" => Ok(Self::Stream),
+            "BATCH" => Ok(Self::Batch),
+            _ => Err(Error::InvalidDownloadType),
+        }
+    }
 }
 
 #[derive(Debug)]

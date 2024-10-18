@@ -3,13 +3,13 @@ use crate::commands::historical::HistoricalArgs;
 use crate::Result;
 use async_trait::async_trait;
 use clap::{Parser, Subcommand};
-use midas_client::client::ApiClient;
+use midas_client::historical::Historical;
 use std::fmt::Debug;
 
 /// Trait for processing commands
 #[async_trait]
 pub trait ProcessCommand {
-    async fn process_command(&self, client: &ApiClient) -> Result<()>;
+    async fn process_command(&self, client: &Historical) -> Result<()>;
 }
 
 #[derive(Debug, Parser)]
@@ -33,7 +33,7 @@ pub enum Commands {
 
 #[async_trait]
 impl ProcessCommand for Commands {
-    async fn process_command(&self, client: &ApiClient) -> Result<()> {
+    async fn process_command(&self, client: &Historical) -> Result<()> {
         match self {
             Commands::FileLoad { file_path } => {
                 load_file(file_path, client).await?;
@@ -51,7 +51,7 @@ impl ProcessCommand for Commands {
     }
 }
 
-pub async fn load_file(file_name: &str, client: &ApiClient) -> Result<()> {
+pub async fn load_file(file_name: &str, client: &Historical) -> Result<()> {
     let response = client.create_mbp_from_file(file_name).await?;
     println!("{:?}", response);
 

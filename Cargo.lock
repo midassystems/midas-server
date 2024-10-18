@@ -147,41 +147,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3d1d046238990b9cf5bcde22a3fb3584ee5cf65fb2765f454ed428c7a0063da"
 
 [[package]]
-name = "api"
-version = "0.1.0"
-dependencies = [
- "actix-rt",
- "anyhow",
- "async-stream",
- "async-trait",
- "axum",
- "axum-test-helper",
- "base64 0.13.1",
- "bigdecimal",
- "bytes",
- "derive_more",
- "dotenv",
- "futures",
- "futures-core",
- "futures-util",
- "hyper 0.14.30",
- "mbn",
- "regex",
- "reqwest 0.11.27",
- "serde",
- "serde_json",
- "serial_test 0.5.1",
- "sha2",
- "sqlx",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tower",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "assert_cmd"
 version = "2.0.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -513,6 +478,7 @@ dependencies = [
  "dotenv",
  "mbn",
  "midas_client",
+ "once_cell",
  "regex",
  "serde",
  "serde_json",
@@ -1059,6 +1025,42 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
+name = "historical"
+version = "0.1.0"
+dependencies = [
+ "actix-rt",
+ "anyhow",
+ "async-stream",
+ "async-trait",
+ "axum",
+ "axum-test-helper",
+ "base64 0.13.1",
+ "bigdecimal",
+ "bytes",
+ "derive_more",
+ "dotenv",
+ "futures",
+ "futures-core",
+ "futures-util",
+ "hyper 0.14.30",
+ "mbn",
+ "pin-project",
+ "regex",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
+ "serial_test 0.5.1",
+ "sha2",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "hkdf"
 version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1458,7 +1460,7 @@ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 [[package]]
 name = "midas_client"
 version = "0.1.0"
-source = "git+https://github.com/anthonyb8/midas-rs.git?branch=main#8c2f86149a047eaa46905512c659e80d0bafcf8c"
+source = "git+https://github.com/anthonyb8/midas-rs.git?branch=main#25571bd1ac89e2b647020ecf3a5daad68b8eac7f"
 dependencies = [
  "anyhow",
  "axum",
@@ -1736,18 +1738,18 @@ checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 
 [[package]]
 name = "pin-project"
-version = "1.1.5"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6bf43b791c5b9e34c3d182969b4abb522f9343702850a2e57f460d00d09b4b3"
+checksum = "baf123a161dde1e524adf36f90bc5d8d3462824a9c43553ad07a8183161189ec"
 dependencies = [
  "pin-project-internal",
 ]
 
 [[package]]
 name = "pin-project-internal"
-version = "1.1.5"
+version = "1.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f38a4412a78282e09a2cf38d195ea5420d15ba0602cb375210efbc877243965"
+checksum = "a4502d8515ca9f32f1fb543d987f63d95a14934883db45bdb48060b6b69257f8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2891,6 +2893,41 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
+]
+
+[[package]]
+name = "trading"
+version = "0.1.0"
+dependencies = [
+ "actix-rt",
+ "anyhow",
+ "async-stream",
+ "async-trait",
+ "axum",
+ "axum-test-helper",
+ "base64 0.13.1",
+ "bigdecimal",
+ "bytes",
+ "derive_more",
+ "dotenv",
+ "futures",
+ "futures-core",
+ "futures-util",
+ "hyper 0.14.30",
+ "mbn",
+ "regex",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
+ "serial_test 0.5.1",
+ "sha2",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
