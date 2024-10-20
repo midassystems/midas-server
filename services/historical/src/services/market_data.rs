@@ -1,4 +1,6 @@
-use crate::database::market_data::{process_records, RecordInsertQueries, RetrieveParams};
+use crate::database::market_data::{
+    process_records, InsertBatch, RecordInsertQueries, RetrieveParams,
+};
 use crate::response::ApiResponse;
 use crate::{Error, Result};
 use async_stream::stream;
@@ -75,7 +77,7 @@ pub async fn bulk_upload(
     Extension(pool): Extension<PgPool>,
     Json(file_path): Json<String>,
 ) -> impl IntoResponse {
-    const BATCH_SIZE: usize = 5000;
+    const BATCH_SIZE: usize = 20000;
     let path = PathBuf::from(&file_path);
 
     if !path.is_file() {
@@ -85,10 +87,11 @@ pub async fn bulk_upload(
 
     info!("Preparing to stream load file : {}", file_path);
 
+    let mut insert_batch = InsertBatch::new();
+
     // Create a stream to send updates
     let progress_stream = stream! {
         let mut records_in_batch = 0;
-        let mut tx = pool.begin().await?;
         let mut decoder = RecordDecoder::<BufReader<File>>::from_file(&path)?;
         let mut decode_iter = decoder.decode_iterator();
 
@@ -98,16 +101,17 @@ pub async fn bulk_upload(
                 Ok(record) => {
                     match record {
                         RecordEnum::Mbp1(msg) => {
-                            msg.insert_query(&mut tx).await?;
+                            insert_batch.process(&msg).await?;
                             records_in_batch += 1;
                         }
                         _ => unimplemented!(),
                     }
 
                     if records_in_batch >= BATCH_SIZE {
-                        info!("Committing batch of records.");
+                        let mut tx = pool.begin().await?;
+                        insert_batch.execute(&mut tx).await?;
+
                         tx.commit().await?;
-                        tx = pool.begin().await?;
                         let processed_records = records_in_batch.clone();
                         records_in_batch = 0; // Reset batch counter
 
@@ -128,7 +132,9 @@ pub async fn bulk_upload(
 
         // Commit remaining records
         if records_in_batch > 0 {
-            info!("Committing final batch of {} records.", records_in_batch);
+            // info!("Committing final batch of {} records.", records_in_batch);
+            let mut tx = pool.begin().await?;
+            insert_batch.execute(&mut tx).await?;
             tx.commit().await?;
             yield Ok(Bytes::from("Final batch committed."));
         }
@@ -259,6 +265,7 @@ mod test {
 
     #[sqlx::test]
     #[serial]
+    // #[ignore]
     async fn test_create_records() {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
@@ -472,6 +479,7 @@ mod test {
 
     #[sqlx::test]
     #[serial]
+    // #[ignore]
     async fn test_get_record() {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();

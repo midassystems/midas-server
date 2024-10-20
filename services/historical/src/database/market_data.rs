@@ -95,12 +95,164 @@ impl RetrieveParams {
 
 }
 
+/// Primary insert method
+pub struct InsertBatch {
+    pub mbp_values: Vec<(i32, i64, i64, i32, i32, i32, i32, i64, i32, i32, String)>,
+    pub bid_ask_batches: Vec<Vec<(i32, i64, i32, i32, i64, i32, i32)>>
+
+}
+impl InsertBatch {
+    pub fn new() -> Self {
+        InsertBatch {
+            mbp_values: Vec::new(),
+            bid_ask_batches: Vec::new(),
+        }
+    }
+
+    pub async fn process(&mut self, record: &Mbp1Msg) -> Result<()> {
+        // Compute the order book hash based on levels
+        let order_book_hash = compute_order_book_hash(&record.levels);
+
+        // Add the current mbp row to the batch
+        self.mbp_values.push((
+            record.hd.instrument_id as i32,
+            record.hd.ts_event as i64,
+            record.price,
+            record.size as i32,
+            record.action as i32,
+            record.side as i32,
+            record.flags as i32,
+            record.ts_recv as i64,
+            record.ts_in_delta,
+            record.sequence as i32,
+            order_book_hash
+        ));
+
+        // Collect bid_ask rows associated with this mbp record
+        let mut bid_ask_for_mbp: Vec<(i32, i64, i32, i32, i64, i32, i32)> = Vec::new();
+        for (depth, level) in record.levels.iter().enumerate() {
+            bid_ask_for_mbp.push((
+                depth as i32,       // Depth
+                level.bid_px,       // Bid price
+                level.bid_sz as i32, // Bid size
+                level.bid_ct as i32, // Bid count
+                level.ask_px,       // Ask price
+                level.ask_sz as i32, // Ask size
+                level.ask_ct as i32  // Ask count
+            ));
+        }
+        self.bid_ask_batches.push(bid_ask_for_mbp);
+        Ok(())
+    }
+
+    pub async fn execute(&mut self, tx: &mut Transaction<'_, Postgres>) -> Result<()> {
+        // Manually unpack mbp_values into separate vectors
+        let mut instrument_ids = Vec::new();
+        let mut ts_events = Vec::new();
+        let mut prices = Vec::new();
+        let mut sizes = Vec::new();
+        let mut actions = Vec::new();
+        let mut sides = Vec::new();
+        let mut flags = Vec::new();
+        let mut ts_recvs = Vec::new();
+        let mut ts_in_deltas = Vec::new();
+        let mut sequences = Vec::new();
+        let mut order_book_hashes = Vec::new();
+
+        for (id, ts, price, size, action, side, flag, recv, delta, seq, hash) in &self.mbp_values {
+            instrument_ids.push(*id);
+            ts_events.push(*ts);
+            prices.push(*price);
+            sizes.push(*size);
+            actions.push(*action);
+            sides.push(*side);
+            flags.push(*flag);
+            ts_recvs.push(*recv);
+            ts_in_deltas.push(*delta);
+            sequences.push(*seq);
+            order_book_hashes.push(hash.as_str()); // Use &str for the string
+        }
+
+        // Now, insert into mbp and get the generated ids
+        let mbp_ids: Vec<i32> = sqlx::query_scalar(
+            r#"
+            INSERT INTO mbp (instrument_id, ts_event, price, size, action, side, flags, ts_recv, ts_in_delta, sequence, order_book_hash)
+            SELECT * FROM UNNEST($1::int[], $2::bigint[], $3::bigint[], $4::int[], $5::int[], $6::int[], $7::int[], $8::bigint[], $9::int[], $10::int[], $11::text[])
+            RETURNING id
+            "#
+        )
+        .bind(&instrument_ids)
+        .bind(&ts_events)
+        .bind(&prices)
+        .bind(&sizes)
+        .bind(&actions)
+        .bind(&sides)
+        .bind(&flags)
+        .bind(&ts_recvs)
+        .bind(&ts_in_deltas)
+        .bind(&sequences)
+        .bind(&order_book_hashes) 
+        .fetch_all(&mut *tx)
+        .await?;
+
+     
+        // Create separate vectors for each field
+        let mut depths = Vec::new();
+        let mut bid_px = Vec::new();
+        let mut bid_sz = Vec::new();
+        let mut bid_ct = Vec::new();
+        let mut ask_px = Vec::new();
+        let mut ask_sz = Vec::new();
+        let mut ask_ct = Vec::new();
+
+        for (idx, _mbp_id) in mbp_ids.iter().enumerate() {
+            let bid_ask_for_current_mbp = &self.bid_ask_batches[idx];
+
+
+            // Unpack the tuples into their respective vectors
+            for (depth, bid_price, bid_size, bid_count, ask_price, ask_size, ask_count) in bid_ask_for_current_mbp {
+                depths.push(*depth);
+                bid_px.push(*bid_price);
+                bid_sz.push(*bid_size);
+                bid_ct.push(*bid_count);
+                ask_px.push(*ask_price);
+                ask_sz.push(*ask_size);
+                ask_ct.push(*ask_count);
+            }
+        }
+
+        // Insert all bid_ask levels associated with this mbp_id
+        sqlx::query(
+            r#"
+            INSERT INTO bid_ask (mbp_id, depth, bid_px, bid_sz, bid_ct, ask_px, ask_sz, ask_ct)
+            SELECT * FROM UNNEST($1::int[], $2::int[], $3::bigint[], $4::int[], $5::int[], $6::bigint[], $7::int[], $8::int[])
+            "#
+        )
+        .bind(mbp_ids)
+        .bind(&depths)
+        .bind(&bid_px)
+        .bind(&bid_sz)
+        .bind(&bid_ct)
+        .bind(&ask_px)
+        .bind(&ask_sz)
+        .bind(&ask_ct)
+        .execute(&mut *tx)
+        .await?;
+
+        // Clear the batch after committing
+        self.mbp_values.clear();
+        self.bid_ask_batches.clear();
+
+        Ok(())
+    }
+}
 
 #[async_trait]
 pub trait RecordInsertQueries {
     async fn insert_query(&self, tx: &mut Transaction<'_, Postgres>) -> Result<()>;
 }
 
+/// For smaller inserts
 #[async_trait]
 impl RecordInsertQueries for Mbp1Msg {
     async fn insert_query(&self, tx: &mut Transaction<'_, Postgres>) -> Result<()> {
@@ -152,7 +304,6 @@ impl RecordInsertQueries for Mbp1Msg {
         Ok(())
     }
 }
-
 
 #[async_trait]
 pub trait RecordsQuery{

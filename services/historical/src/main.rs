@@ -12,7 +12,6 @@ async fn main() -> Result<()> {
     dotenv().ok();
 
     // Setup Logging
-    /*     let file_path = env::var("API_LOG_FILE")?; */
     let _ = system_logger()?;
 
     // Initialize the database and obtain a connection pool
