@@ -26,7 +26,7 @@ RUN cargo build --release --package cli --package vendors
 RUN ls -la /app/target/release
 
 # Final stage
-FROM debian:bookworm-slim
+FROM debian:bullseye
 
 # Install cron and bash
 RUN apt-get update && apt-get install -y cron bash && apt-get install -y jq && apt-get install vim -y
