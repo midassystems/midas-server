@@ -5,7 +5,7 @@
       "name": "lean hogs",
       "stype": "continuous",
       "dataset": "GLBX.MDP3",
-      "last_update": "2024-10-14",
+      "last_update": "2024-10-18",
       "first_available": "2024-10-14",
       "active": true
     },
@@ -14,7 +14,7 @@
       "name": "corn",
       "stype": "continuous",
       "dataset": "GLBX.MDP3",
-      "last_update": "2024-10-14",
+      "last_update": "2024-10-18",
       "first_available": "2024-10-14",
       "active": true
     }
