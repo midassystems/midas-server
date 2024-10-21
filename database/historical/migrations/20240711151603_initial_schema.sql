@@ -45,3 +45,15 @@ CREATE TABLE IF NOT EXISTS bid_ask (
 CREATE INDEX idx_mbp_instrument_ts_event ON mbp (instrument_id, ts_event);
 CREATE INDEX idx_bid_ask_mbp_id_depth ON bid_ask (mbp_id, depth);
 
+-- Function for Bbo queries 
+CREATE FUNCTION coalesce_r_sfunc(state anyelement, value anyelement)
+RETURNS anyelement
+IMMUTABLE PARALLEL SAFE
+AS $$
+    SELECT COALESCE(value, state);
+$$ LANGUAGE sql;
+
+CREATE AGGREGATE find_last_ignore_nulls(anyelement) (
+    SFUNC = coalesce_r_sfunc,
+    STYPE = anyelement
+);

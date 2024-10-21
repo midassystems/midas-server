@@ -6,7 +6,6 @@ use databento::dbn::Schema;
 use midas_client::historical::Historical;
 use std::path::PathBuf;
 use std::str::FromStr;
-use time::Duration;
 use time::{format_description::well_known::Rfc3339, macros::time, OffsetDateTime};
 use vendors::databento::client::DatabentoDownloadType;
 
@@ -54,7 +53,7 @@ pub struct DatabentoArgs {
 pub enum DatabentoCommands {
     /// Standard update, adds mbp for tickers already in the database for entire previous day.
     Update {
-        #[arg(long, default_value = "data/tickers.json")]
+        #[arg(long, default_value = "config/tickers.json")]
         tickers_filepath: String,
     },
     /// Download databento data to file
@@ -94,7 +93,7 @@ pub enum DatabentoCommands {
         dbn_downloadtype: String,
 
         /// Schema ex. Mbp1, Ohlcv
-        #[arg(long, default_value = "data/tickers.json")]
+        #[arg(long, default_value = "config/tickers.json")]
         tickers_filepath: String,
 
         /// File path to save the downloaded binary data.
@@ -107,21 +106,16 @@ pub enum DatabentoCommands {
         dbn_filepath: String,
         #[arg(long)]
         mbn_filepath: String,
+        #[arg(long)]
+        mbn_metadata: bool,
     },
 }
 
 #[async_trait]
 impl ProcessCommand for DatabentoCommands {
     async fn process_command(&self, client: &Historical) -> Result<()> {
-        // Ensure the client is available
         match self {
             DatabentoCommands::Update { tickers_filepath } => {
-                let now = OffsetDateTime::now_utc();
-                let start = (now - Duration::days(1)).replace_time(time::macros::time!(00:00));
-                let end = now.replace_time(time::macros::time!(00:00));
-
-                // println!("\nUpdating Database: {:?}", now);
-                println!("start {:?}, end {:?}", start, end);
                 // Update
                 let _ = vendors::databento::update(tickers_filepath, client).await?;
 
@@ -180,11 +174,12 @@ impl ProcessCommand for DatabentoCommands {
             DatabentoCommands::Compare {
                 dbn_filepath,
                 mbn_filepath,
+                mbn_metadata,
             } => {
                 let _ = vendors::databento::compare::compare_dbn(
                     PathBuf::from(dbn_filepath),
                     &PathBuf::from(mbn_filepath),
-                    true,
+                    *mbn_metadata,
                 )
                 .await?;
 
