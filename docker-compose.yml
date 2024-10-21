@@ -1,10 +1,14 @@
 services:
-  host_setup:
+  test_host:
+    build:
+      context: ../
+      dockerfile: ./server/Dockerfile
     profiles:
-      - production
+      - test-server
     volumes:
-      - scripts:/scripts  # Just bind the scripts volume
-    command: ["./scripts/host-setup.sh"]  # Run your setup script from the volume
+      - /var/run/docker.sock:/var/run/docker.sock  # Mount Docker socket
+    privileged: true  # Required for Docker-in-Docker setup
+    command: ["tail", "-f", "/dev/null"]
     
   # Single PostgreSQL service hosting both databases
   postgres:
@@ -14,9 +18,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     profiles:
       - dev
-      - database
-      - testing
-      - production  # API should run in both dev and production
+      - production  
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ${SCRIPTS_DIR}/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
@@ -33,6 +35,9 @@ services:
       HISTORICAL_DATABASE_URL: ${HISTORICAL_DATABASE_URL}
     depends_on:
       - postgres  # Wait for the database to be ready
+    profiles:
+      - dev
+      - production  # API should run in both dev and production
     command: ["/app/scripts/migrate-db.sh", "historical"]
     networks:
       - app-network
@@ -49,8 +54,6 @@ services:
       LOG_LEVEL: info
     profiles:
       - dev
-      - testing
-      - database
       - production  # API should run in both dev and production
     depends_on:
       - historical-database
@@ -74,6 +77,9 @@ services:
       TRADING_DATABASE_URL: ${TRADING_DATABASE_URL}
     depends_on:
       - postgres  # Wait for the database to be ready
+    profiles:
+      - dev
+      - production  # API should run in both dev and production
     command: ["/app/scripts/migrate-db.sh", "trading"]
     networks:
       - app-network
@@ -91,8 +97,6 @@ services:
       LOG_LEVEL: info
     profiles:
       - dev
-      - testing
-      - database
       - production  # API should run in both dev and production
     depends_on:
       - trading-database
@@ -115,7 +119,6 @@ services:
     environment:
       MIDAS_URL: http://historical-service:${HISTORICAL_PORT}
     profiles:
-      - testing
       - production  
     volumes:
       - data:/app/data

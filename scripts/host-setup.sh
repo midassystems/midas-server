@@ -2,7 +2,9 @@
 
 # Define directories
 LOG_DIR=/var/log/midas
-DATA_DIR=/var/data/midas
+DATA_DIR=/var/data
+RAW_DIR=/var/data/raw_data/
+PROCESSED_DIR=/var/data/processed_data/
 SCRIPTS_DIR=/opt/midas/scripts
 
 # Create directories if they don't exist
@@ -17,6 +19,9 @@ else
 	echo "Log directory already exists: $LOG_DIR"
 fi
 
+touch $LOG_DIR/historical.log
+touch $LOG_DIR/trading.log
+
 # Create data directory
 if [ ! -d "$DATA_DIR" ]; then
 	sudo mkdir -p "$DATA_DIR"
@@ -24,6 +29,24 @@ if [ ! -d "$DATA_DIR" ]; then
 	echo "Data directory created: $DATA_DIR"
 else
 	echo "Data directory already exists: $DATA_DIR"
+fi
+
+# Create data directory
+if [ ! -d "$PROCESSED_DIR" ]; then
+	sudo mkdir -p "$PROCESSED_DIR"
+	sudo chown "$USER":"$USER" "$PROCESSED_DIR"
+	echo "Data directory created: $PROCESSED_DIR"
+else
+	echo "Data directory already exists: $PROCESSED_DIR"
+fi
+
+# Create data directory
+if [ ! -d "$RAW_DIR" ]; then
+	sudo mkdir -p "$RAW_DIR"
+	sudo chown "$USER":"$USER" "$RAW_DIR"
+	echo "Data directory created: $RAW_DIR"
+else
+	echo "Data directory already exists: $RAW_DIR"
 fi
 
 # Create scripts directory
@@ -44,6 +67,8 @@ echo "Scripts copied to $SCRIPTS_DIR."
 # Set permissions (ensure Docker containers can write to these directories)
 sudo chmod 755 "$LOG_DIR"
 sudo chmod 755 "$DATA_DIR"
+sudo chmod 755 "$RAW_DIR"
+sudo chmod 755 "$PROCESSED_DIR"
 sudo chmod 755 "$SCRIPTS_DIR"
 
 # Optionally delete the repository directory (uncomment to enable)

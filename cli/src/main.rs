@@ -4,7 +4,6 @@ use cli::{
     Result,
 };
 use midas_client::historical::Historical;
-// use std::env;
 
 #[tokio::main]
 async fn main() -> Result<()> {
