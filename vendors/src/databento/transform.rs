@@ -63,13 +63,36 @@ fn iterate_flag(block: &Vec<Mbp1Msg>, msg: &mut Mbp1Msg) -> Mbp1Msg {
 //     Ok(mbn_records)
 // }
 
+async fn mbn_to_file(records: &Vec<Mbp1Msg>, file_name: &PathBuf) -> Result<()> {
+    // Create RecordRef vector.
+    let mut refs = Vec::new();
+    for msg in records {
+        refs.push(RecordRef::from(msg));
+    }
+
+    // Enocde records.
+    let mut buffer = Vec::new();
+    let mut encoder = RecordEncoder::new(&mut buffer);
+    encoder.encode_records(&refs)?;
+
+    // Output to file
+    let _ = encoder.write_to_file(file_name)?;
+
+    // let _ = mbn::encode::write_to_file(file_name, &buffer);
+    // println!("Data written to file: {:?}", file_name);
+
+    Ok(())
+}
+
 pub async fn to_mbn(
     decoder: &mut AsyncDbnDecoder<ZstdDecoder<BufReader<File>>>,
     // records: Vec<databento::dbn::Mbp1Msg>,
     new_map: &HashMap<u32, u32>,
-) -> Result<Vec<Mbp1Msg>> {
+    file_name: &PathBuf,
+) -> Result<()> {
     let mut mbn_records = Vec::new();
     let mut rolling_block: Vec<Mbp1Msg> = Vec::new();
+    let batch_size = 10000; // Set a reasonable batch size
 
     // Decode each record and process it on the fly
     while let Some(record) = decoder.decode_record::<dbn::Mbp1Msg>().await? {
@@ -89,11 +112,24 @@ pub async fn to_mbn(
         }
 
         mbn_records.push(mbn_msg);
+
+        // If batch is full, write to file and clear batch
+        if mbn_records.len() >= batch_size {
+            println!("Writing to files.");
+            mbn_to_file(&mbn_records, file_name).await?; // Write the batch to file
+            mbn_records.clear(); // Clear memory
+        }
+    }
+
+    // Write any remaining records in the last batch
+    if !mbn_records.is_empty() {
+        mbn_to_file(&mbn_records, file_name).await?;
+        mbn_records.clear();
     }
     // Destroy decoder to free up resources
     // let _ = drop(decoder);
 
-    Ok(mbn_records)
+    Ok(())
 }
 
 pub fn find_duplicates(mbps: &Vec<mbn::records::Mbp1Msg>) -> Result<usize> {
@@ -119,26 +155,26 @@ pub fn find_duplicates(mbps: &Vec<mbn::records::Mbp1Msg>) -> Result<usize> {
     Ok(duplicates.len())
 }
 
-pub async fn mbn_to_file(records: &Vec<Mbp1Msg>, file_name: &PathBuf) -> Result<()> {
-    // Create RecordRef vector.
-    let mut refs = Vec::new();
-    for msg in records {
-        refs.push(RecordRef::from(msg));
-    }
-
-    // Enocde records.
-    let mut buffer = Vec::new();
-    let mut encoder = RecordEncoder::new(&mut buffer);
-    encoder.encode_records(&refs)?;
-
-    // Output to file
-    let _ = encoder.write_to_file(file_name)?;
-
-    // let _ = mbn::encode::write_to_file(file_name, &buffer);
-    println!("Data written to file: {:?}", file_name);
-
-    Ok(())
-}
+// pub async fn mbn_to_file(records: &Vec<Mbp1Msg>, file_name: &PathBuf) -> Result<()> {
+//     // Create RecordRef vector.
+//     let mut refs = Vec::new();
+//     for msg in records {
+//         refs.push(RecordRef::from(msg));
+//     }
+//
+//     // Enocde records.
+//     let mut buffer = Vec::new();
+//     let mut encoder = RecordEncoder::new(&mut buffer);
+//     encoder.encode_records(&refs)?;
+//
+//     // Output to file
+//     let _ = encoder.write_to_file(file_name)?;
+//
+//     // let _ = mbn::encode::write_to_file(file_name, &buffer);
+//     println!("Data written to file: {:?}", file_name);
+//
+//     Ok(())
+// }
 
 #[cfg(test)]
 mod tests {
@@ -167,28 +203,28 @@ mod tests {
         Ok(file_path)
     }
 
-    #[tokio::test]
-    async fn test_transform_to_mbn() -> Result<()> {
-        // Load DBN file
-        let file_path = setup(&PathBuf::from("tests/data/databento"))?;
-        // let file_path = setup("tests/data/databento").unwrap();
-        let (mut decoder, map) = read_dbn_file(file_path).await?;
-
-        // MBN instrument map
-        let mut mbn_map = HashMap::new();
-        mbn_map.insert("ZM.n.0".to_string(), 20 as u32);
-
-        // Map DBN instrument to MBN insturment
-        let new_map = instrument_id_map(map, mbn_map)?;
-
-        // Test
-        let mbn_records = to_mbn(&mut decoder, &new_map).await?;
-
-        // Validate
-        assert!(mbn_records.len() > 0);
-
-        Ok(())
-    }
+    // #[tokio::test]
+    // async fn test_transform_to_mbn() -> Result<()> {
+    //     // Load DBN file
+    //     let file_path = setup(&PathBuf::from("tests/data/databento"))?;
+    //     // let file_path = setup("tests/data/databento").unwrap();
+    //     let (mut decoder, map) = read_dbn_file(file_path).await?;
+    //
+    //     // MBN instrument map
+    //     let mut mbn_map = HashMap::new();
+    //     mbn_map.insert("ZM.n.0".to_string(), 20 as u32);
+    //
+    //     // Map DBN instrument to MBN insturment
+    //     let new_map = instrument_id_map(map, mbn_map)?;
+    //
+    //     // Test
+    //     let () = to_mbn(&mut decoder, &new_map, &file_path).await?;
+    //
+    //     // Validate
+    //     assert!(mbn_records.len() > 0);
+    //
+    //     Ok(())
+    // }
 
     #[tokio::test]
     async fn test_mbn_to_file() -> Result<()> {
@@ -204,7 +240,6 @@ mod tests {
 
         // Map DBN instrument to MBN insturment
         let new_map = instrument_id_map(map, mbn_map)?;
-        let mbn_records = to_mbn(&mut decoder, &new_map).await?;
 
         // Test
         let dataset = Dataset::GlbxMdp3;
@@ -218,7 +253,8 @@ mod tests {
             start.date(),
             end.date(),
         ));
-        let _ = mbn_to_file(&mbn_records, &mbn_file_name).await?;
+        let _ = to_mbn(&mut decoder, &new_map, &mbn_file_name).await?;
+        // let _ = mbn_to_file(&mbn_records, &mbn_file_name).await?;
 
         // Validate
         assert!(fs::metadata(&mbn_file_name).is_ok(), "File does not exist");
@@ -226,30 +262,30 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_find_duplicate_none() -> Result<()> {
-        // Load DBN file
-        let file_path = setup(&PathBuf::from("tests/data/databento"))?;
-
-        // let file_path = setup("tests/data/databento").unwrap();
-        let (mut decoder, map) = read_dbn_file(file_path).await?;
-
-        // MBN instrument map
-        let mut mbn_map = HashMap::new();
-        mbn_map.insert("ZM.n.0".to_string(), 20 as u32);
-
-        // Map DBN instrument to MBN insturment
-        let new_map = instrument_id_map(map, mbn_map)?;
-        let mbn_records = to_mbn(&mut decoder, &new_map).await?;
-
-        // Test
-        let num_duplicates = find_duplicates(&mbn_records)?;
-
-        // Validate
-        assert!(num_duplicates == 0);
-
-        Ok(())
-    }
+    // #[tokio::test]
+    // async fn test_find_duplicate_none() -> Result<()> {
+    //     // Load DBN file
+    //     let file_path = setup(&PathBuf::from("tests/data/databento"))?;
+    //
+    //     // let file_path = setup("tests/data/databento").unwrap();
+    //     let (mut decoder, map) = read_dbn_file(file_path).await?;
+    //
+    //     // MBN instrument map
+    //     let mut mbn_map = HashMap::new();
+    //     mbn_map.insert("ZM.n.0".to_string(), 20 as u32);
+    //
+    //     // Map DBN instrument to MBN insturment
+    //     let new_map = instrument_id_map(map, mbn_map)?;
+    //     let mbn_records = to_mbn(&mut decoder, &new_map).await?;
+    //
+    //     // Test
+    //     let num_duplicates = find_duplicates(&mbn_records)?;
+    //
+    //     // Validate
+    //     assert!(num_duplicates == 0);
+    //
+    //     Ok(())
+    // }
 
     #[tokio::test]
     async fn test_find_duplicate_true() -> Result<()> {

@@ -474,6 +474,11 @@ mod test {
             .expect("Error on delete.");
         let _ = transaction.commit().await;
 
+        // Cleanup
+        if path.exists() {
+            std::fs::remove_file(&path).expect("Failed to delete the test file.");
+        }
+
         Ok(())
     }
 

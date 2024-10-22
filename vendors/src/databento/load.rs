@@ -18,7 +18,7 @@ mod tests {
     use crate::databento::{
         client::databento_file_path,
         extract::read_dbn_file,
-        transform::{instrument_id_map, mbn_to_file, to_mbn},
+        transform::{instrument_id_map, to_mbn},
     };
     use crate::error::Result;
     use crate::tickers::get_tickers;
@@ -60,17 +60,21 @@ mod tests {
         let new_map = instrument_id_map(map, mbn_map.clone())?;
 
         // Convert Records oto MBN
-        let mbn_records = to_mbn(&mut records, &new_map).await?; // Now you have new_map = {id: mbn_id}
+        let mbn_file_name = PathBuf::from("../data/load_testing_file.bin");
+        let _ = to_mbn(&mut records, &new_map, &mbn_file_name).await?; // Now you have new_map = {id: mbn_id}
 
         // -- To MBN file
-        let mbn_file_name = PathBuf::from("../data/load_testing_file.bin");
-        let _ = mbn_to_file(&mbn_records, &mbn_file_name).await?;
+        // let _ = mbn_to_file(&mbn_records, &mbn_file_name).await?;
 
         // Test
         let path = PathBuf::from("data/load_testing_file.bin");
         let _ = load_file_to_db(&path, &client).await?;
 
         // Cleanup
+        if mbn_file_name.exists() {
+            std::fs::remove_file(&mbn_file_name).expect("Failed to delete the test file.");
+        }
+
         for value in mbn_map.values() {
             let _ = client.delete_symbol(&(*value as i32)).await?;
         }
