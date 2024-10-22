@@ -126,7 +126,7 @@ pub async fn etl_pipeline(
     let processed_dir = env::var("PROCESSED_DIR").expect("PROCESSED_DIR not set.");
 
     // -- EXTRACT
-    let records;
+    let mut records;
     let dbn_map;
     if download_type == &DatabentoDownloadType::Stream {
         (records, dbn_map) = read_dbn_file(download_path.clone()).await?;
@@ -137,7 +137,9 @@ pub async fn etl_pipeline(
     // -- TRANSFORM
     // Map DBN instrument to MBN insturment
     let new_map = instrument_id_map(dbn_map, mbn_map.clone())?;
-    let mbn_records = to_mbn(records, &new_map)?;
+    let mbn_records = to_mbn(&mut records, &new_map).await?;
+    let _ = drop(records);
+
     let num_duplicates = find_duplicates(&mbn_records);
     println!("Duplicates : {:?}", num_duplicates);
 

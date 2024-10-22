@@ -1,7 +1,11 @@
 use crate::error::{Error, Result};
+use async_compression::tokio::bufread::ZstdDecoder; // For zstd decompression
+use databento::{dbn, historical::timeseries::AsyncDbnDecoder};
 use mbn::{self, encode::RecordEncoder, record_ref::RecordRef, records::Mbp1Msg};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use tokio::fs::File;
+use tokio::io::BufReader; // For buffered reading
 
 pub fn instrument_id_map(
     dbn_map: HashMap<String, String>,
@@ -32,15 +36,46 @@ fn iterate_flag(block: &Vec<Mbp1Msg>, msg: &mut Mbp1Msg) -> Mbp1Msg {
     }
 }
 
-pub fn to_mbn(
-    records: Vec<databento::dbn::Mbp1Msg>,
+// pub fn to_mbn(
+//     records: Vec<databento::dbn::Mbp1Msg>,
+//     new_map: &HashMap<u32, u32>,
+// ) -> Result<Vec<Mbp1Msg>> {
+//     let mut mbn_records = Vec::new();
+//     let mut rolling_block: Vec<Mbp1Msg> = Vec::new();
+//
+//     for msg in records {
+//         let mut mbn_msg = Mbp1Msg::from(msg);
+//
+//         if let Some(new_id) = new_map.get(&mbn_msg.hd.instrument_id) {
+//             mbn_msg.hd.instrument_id = *new_id;
+//         }
+//
+//         if mbn_msg.flags == 0 {
+//             let updated_msg = iterate_flag(&rolling_block, &mut mbn_msg);
+//             rolling_block.push(updated_msg);
+//         } else {
+//             rolling_block.clear(); // Clear the rolling block
+//         }
+//
+//         mbn_records.push(mbn_msg);
+//     }
+//
+//     Ok(mbn_records)
+// }
+
+pub async fn to_mbn(
+    decoder: &mut AsyncDbnDecoder<ZstdDecoder<BufReader<File>>>,
+    // records: Vec<databento::dbn::Mbp1Msg>,
     new_map: &HashMap<u32, u32>,
 ) -> Result<Vec<Mbp1Msg>> {
     let mut mbn_records = Vec::new();
     let mut rolling_block: Vec<Mbp1Msg> = Vec::new();
 
-    for msg in records {
-        let mut mbn_msg = Mbp1Msg::from(msg);
+    // Decode each record and process it on the fly
+    while let Some(record) = decoder.decode_record::<dbn::Mbp1Msg>().await? {
+        let mut mbn_msg = Mbp1Msg::from(record);
+
+        // let mut mbn_msg = Mbp1Msg::from(msg);
 
         if let Some(new_id) = new_map.get(&mbn_msg.hd.instrument_id) {
             mbn_msg.hd.instrument_id = *new_id;
@@ -55,6 +90,8 @@ pub fn to_mbn(
 
         mbn_records.push(mbn_msg);
     }
+    // Destroy decoder to free up resources
+    // let _ = drop(decoder);
 
     Ok(mbn_records)
 }
@@ -135,7 +172,7 @@ mod tests {
         // Load DBN file
         let file_path = setup(&PathBuf::from("tests/data/databento"))?;
         // let file_path = setup("tests/data/databento").unwrap();
-        let (records, map) = read_dbn_file(file_path).await?;
+        let (mut decoder, map) = read_dbn_file(file_path).await?;
 
         // MBN instrument map
         let mut mbn_map = HashMap::new();
@@ -145,7 +182,7 @@ mod tests {
         let new_map = instrument_id_map(map, mbn_map)?;
 
         // Test
-        let mbn_records = to_mbn(records, &new_map)?;
+        let mbn_records = to_mbn(&mut decoder, &new_map).await?;
 
         // Validate
         assert!(mbn_records.len() > 0);
@@ -159,7 +196,7 @@ mod tests {
         let file_path = setup(&PathBuf::from("tests/data/databento"))?;
 
         // let file_path = setup("tests/data/databento").unwrap();
-        let (records, map) = read_dbn_file(file_path).await?;
+        let (mut decoder, map) = read_dbn_file(file_path).await?;
 
         // MBN instrument map
         let mut mbn_map = HashMap::new();
@@ -167,7 +204,7 @@ mod tests {
 
         // Map DBN instrument to MBN insturment
         let new_map = instrument_id_map(map, mbn_map)?;
-        let mbn_records = to_mbn(records, &new_map)?;
+        let mbn_records = to_mbn(&mut decoder, &new_map).await?;
 
         // Test
         let dataset = Dataset::GlbxMdp3;
@@ -195,7 +232,7 @@ mod tests {
         let file_path = setup(&PathBuf::from("tests/data/databento"))?;
 
         // let file_path = setup("tests/data/databento").unwrap();
-        let (records, map) = read_dbn_file(file_path).await?;
+        let (mut decoder, map) = read_dbn_file(file_path).await?;
 
         // MBN instrument map
         let mut mbn_map = HashMap::new();
@@ -203,7 +240,7 @@ mod tests {
 
         // Map DBN instrument to MBN insturment
         let new_map = instrument_id_map(map, mbn_map)?;
-        let mbn_records = to_mbn(records, &new_map)?;
+        let mbn_records = to_mbn(&mut decoder, &new_map).await?;
 
         // Test
         let num_duplicates = find_duplicates(&mbn_records)?;
