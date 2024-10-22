@@ -54,13 +54,13 @@ mod tests {
         // Load DBN file
         let file_path = setup(&PathBuf::from("tests/data/databento"))?;
         // let file_path = setup("tests/data/databento").unwrap();
-        let (records, map) = read_dbn_file(file_path).await?;
+        let (mut records, map) = read_dbn_file(file_path).await?;
 
         // Create the new map
         let new_map = instrument_id_map(map, mbn_map.clone())?;
 
         // Convert Records oto MBN
-        let mbn_records = to_mbn(records, &new_map)?; // Now you have new_map = {id: mbn_id}
+        let mbn_records = to_mbn(&mut records, &new_map).await?; // Now you have new_map = {id: mbn_id}
 
         // -- To MBN file
         let mbn_file_name = PathBuf::from("../data/load_testing_file.bin");
