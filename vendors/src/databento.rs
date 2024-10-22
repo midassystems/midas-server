@@ -9,7 +9,7 @@ use crate::databento::{
     extract::{read_dbn_batch_dir, read_dbn_file},
     load::load_file_to_db,
     transform::find_duplicates,
-    transform::{instrument_id_map, mbn_to_file, to_mbn},
+    transform::{instrument_id_map, to_mbn},
 };
 use crate::error::{Error, Result};
 use crate::tickers::get_tickers;
@@ -136,17 +136,18 @@ pub async fn etl_pipeline(
 
     // -- TRANSFORM
     // Map DBN instrument to MBN insturment
+    let mbn_filepath = &PathBuf::from(processed_dir).join(mbn_filename);
     let new_map = instrument_id_map(dbn_map, mbn_map.clone())?;
-    let mbn_records = to_mbn(&mut records, &new_map).await?;
+    let _ = to_mbn(&mut records, &new_map, mbn_filepath).await?;
     let _ = drop(records);
+    println!("MBN Path : {:?}", mbn_filepath);
 
-    let num_duplicates = find_duplicates(&mbn_records);
-    println!("Duplicates : {:?}", num_duplicates);
+    // -- Check duplicates
+    // let num_duplicates = find_duplicates(&mbn_records);
+    // println!("Duplicates : {:?}", num_duplicates);
 
     // -- To MBN file
-    let mbn_filepath = &PathBuf::from(processed_dir).join(mbn_filename);
-    let _ = mbn_to_file(&mbn_records, &mbn_filepath).await?;
-    println!("MBN Path : {:?}", mbn_filepath);
+    // let _ = mbn_to_file(&mbn_records, &mbn_filepath).await?;
 
     // -- LOAD
     let mbn_filepath = &PathBuf::from("data/processed_data").join(mbn_filename);
