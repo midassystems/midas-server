@@ -106,8 +106,6 @@ pub enum DatabentoCommands {
         dbn_filepath: String,
         #[arg(long)]
         mbn_filepath: String,
-        #[arg(long)]
-        mbn_metadata: bool,
     },
 }
 
@@ -174,12 +172,10 @@ impl ProcessCommand for DatabentoCommands {
             DatabentoCommands::Compare {
                 dbn_filepath,
                 mbn_filepath,
-                mbn_metadata,
             } => {
                 let _ = vendors::databento::compare::compare_dbn(
                     PathBuf::from(dbn_filepath),
                     &PathBuf::from(mbn_filepath),
-                    *mbn_metadata,
                 )
                 .await?;
 

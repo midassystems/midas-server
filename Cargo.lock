@@ -1426,17 +1426,19 @@ checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
 [[package]]
 name = "mbn"
 version = "0.1.0"
-source = "git+https://github.com/anthonyb8/mbn.git?branch=main#987e8c2ae32d4f89480265d29ec15b3826f574b4"
+source = "git+https://github.com/anthonyb8/mbn.git?branch=main#963834fd43282e40f0cbc4612e1f3d46be68e772"
 dependencies = [
  "bigdecimal",
  "chrono",
  "databento",
  "dbn",
+ "futures",
  "num_enum",
  "serde",
  "serde_json",
  "sqlx",
  "thiserror",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]
@@ -1460,7 +1462,7 @@ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 [[package]]
 name = "midas_client"
 version = "0.1.0"
-source = "git+https://github.com/anthonyb8/midas-rs.git?branch=main#25571bd1ac89e2b647020ecf3a5daad68b8eac7f"
+source = "git+https://github.com/anthonyb8/midas-rs.git?branch=main#feecbd2ff7ff3c8e992e4fbca479d3e62b2713aa"
 dependencies = [
  "anyhow",
  "axum",

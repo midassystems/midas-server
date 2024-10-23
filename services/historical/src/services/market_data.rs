@@ -132,7 +132,6 @@ pub async fn bulk_upload(
 
         // Commit remaining records
         if records_in_batch > 0 {
-            // info!("Committing final batch of {} records.", records_in_batch);
             let mut tx = pool.begin().await?;
             insert_batch.execute(&mut tx).await?;
             tx.commit().await?;
@@ -256,7 +255,7 @@ mod test {
     use mbn::encode::RecordEncoder;
     use mbn::record_ref::RecordRef;
     use mbn::{
-        decode::CombinedDecoder,
+        decode::Decoder,
         enums::Schema,
         records::{BidAskPair, Mbp1Msg, RecordHeader},
         symbols::Instrument,
@@ -485,7 +484,7 @@ mod test {
     #[sqlx::test]
     #[serial]
     // #[ignore]
-    async fn test_get_record() {
+    async fn test_get_record() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
         let mut transaction = pool.begin().await.expect("Error settign up database.");
@@ -581,8 +580,8 @@ mod test {
         }
 
         let cursor = Cursor::new(buffer);
-        let mut decoder = CombinedDecoder::new(cursor);
-        let (_metadata, records) = decoder.decode().expect("Error decoding metadata.");
+        let mut decoder = Decoder::new(cursor)?;
+        let records = decoder.decode()?; //.expect("Error decoding metadata.");
 
         // Validate
         // println!("Metadata {:?}", metadata);
@@ -598,5 +597,7 @@ mod test {
             .await
             .expect("Error on delete.");
         let _ = transaction.commit().await;
+
+        Ok(())
     }
 }

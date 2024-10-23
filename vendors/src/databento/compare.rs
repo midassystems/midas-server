@@ -1,104 +1,67 @@
-use crate::databento::extract::symbol_map;
+use crate::databento::extract::read_dbn_file;
 use crate::error::{Error, Result};
-use databento::{dbn, historical::timeseries::AsyncDbnDecoder};
-use mbn::decode::{CombinedDecoder, RecordDecoder};
-use std::collections::HashMap;
-use std::fs::File;
-use std::io::BufReader;
+use mbn::decode::AsyncDecoder;
+use mbn::record_enum::RecordEnum;
 use std::path::PathBuf;
+use tokio::fs::File;
+use tokio::io::BufReader;
 
-pub async fn read_dbn_file(
-    filepath: PathBuf,
-) -> Result<(Vec<dbn::RecordEnum>, HashMap<String, String>)> {
-    // Read the file
-    let mut decoder = AsyncDbnDecoder::from_zstd_file(filepath.clone())
-        .await
-        .map_err(|_| Error::FileNotFoundError(format!("File not found: {:?}", filepath)))?;
+pub async fn read_mbn_file(filepath: &PathBuf) -> Result<AsyncDecoder<BufReader<File>>> {
+    let decoder = AsyncDecoder::<BufReader<File>>::from_file(filepath).await?;
 
-    // Extract Symbol Map
-    let metadata = decoder.metadata();
-    let map = symbol_map(&metadata)?;
-
-    // Decode to vector of messages
-    let mut records = Vec::new();
-    while let Some(record) = decoder.decode_record_ref().await? {
-        let record_enum = record.as_enum()?;
-        records.push(record_enum.to_owned());
-    }
-
-    Ok((records, map))
+    Ok(decoder)
 }
 
-pub async fn read_mbn_file(
-    filepath: &PathBuf,
-    metadata_flag: bool,
-) -> Result<Vec<mbn::record_enum::RecordEnum>> {
-    let records;
-    if metadata_flag {
-        let mut decoder = CombinedDecoder::<BufReader<File>>::from_file(filepath)
-            .map_err(|_| Error::FileNotFoundError(format!("File not found: {:?}", filepath)))?;
+pub async fn compare_dbn(dbn_filepath: PathBuf, mbn_filepath: &PathBuf) -> Result<()> {
+    let batch_size = 1000; // New parameter to control batch size
+    let mut mbn_decoder = read_mbn_file(mbn_filepath).await?;
+    let (mut dbn_decoder, _map) = read_dbn_file(dbn_filepath).await?;
 
-        // Use the iterator to decode records one by one
-        if let Some(metadata) = decoder.decode_metadata()? {
-            println!("Metadata: {:?}", metadata);
-        }
+    let mut mbn_batch = Vec::new();
+    let mut mbn_decoder_done = false;
 
-        // Decode all records
-        records = decoder.decode_records()?;
-    } else {
-        let mut decoder = RecordDecoder::<BufReader<File>>::from_file(filepath)
-            .map_err(|_| Error::FileNotFoundError(format!("File not found: {:?}", filepath)))?;
-        // let mut records_ref = decoder.decode_ref()?;
-
-        // Validate
-        records = decoder.decode_to_owned().map_err(|_| {
-            Error::Conversion(format!("Error decoding mbn records : {:?}", filepath))
-        })?;
-    }
-    Ok(records)
-}
-
-pub async fn compare_dbn(
-    dbn_filepath: PathBuf,
-    mbn_filepath: &PathBuf,
-    metadata_flag: bool,
-) -> Result<()> {
-    let mut mbn_records = read_mbn_file(mbn_filepath, metadata_flag).await?;
-    let (dbn_records, _map) = read_dbn_file(dbn_filepath).await?;
-
-    println!("Length mbn: {:?}", mbn_records.len());
-    println!("Length dbn: {:?}", dbn_records.len());
-
-    // Track unmatched dbn_records
+    // Keep track of any unmatched DBN records
     let mut unmatched_dbn_records = Vec::new();
 
-    // For each dbn_record, check if there is a matching record in mbn_records using PartialEq
-    for dbn_record in &dbn_records {
-        if let Some(pos) = mbn_records
+    // Start decoding and comparing
+    while let Some(dbn_record) = dbn_decoder.decode_record_ref().await? {
+        let dbn_record_enum = dbn_record.as_enum()?.to_owned();
+
+        // If MBN batch is empty, refill it
+        if mbn_batch.len() < batch_size && !mbn_decoder_done {
+            while let Some(mbn_record) = mbn_decoder.decode_ref().await? {
+                mbn_batch.push(RecordEnum::from_ref(mbn_record)?);
+            }
+            if mbn_batch.is_empty() {
+                mbn_decoder_done = true; // No more MBN records
+            }
+        }
+
+        // Try to find a match for the current DBN record in the MBN batch
+        if let Some(pos) = mbn_batch
             .iter()
-            .position(|mbn_record| mbn_record == dbn_record)
+            .position(|mbn_record| mbn_record == &dbn_record_enum)
         {
-            // Remove the matched record from mbn_records
-            mbn_records.remove(pos);
+            mbn_batch.remove(pos); // Remove matched record
         } else {
-            // If no match is found, add the dbn_record to unmatched list
-            unmatched_dbn_records.push(dbn_record);
+            // If no match found, add to unmatched DBN list
+            unmatched_dbn_records.push(dbn_record_enum.to_owned());
         }
     }
 
-    // If there are remaining unmatched records in dbn_records, report them
+    // Check for remaining unmatched MBN records
+    if !mbn_batch.is_empty() {
+        return Err(Error::CustomError(format!(
+            "Unmatched records found in mbn_records: {:?}",
+            mbn_batch
+        )));
+    }
+
+    // Check for remaining unmatched DBN records
     if !unmatched_dbn_records.is_empty() {
         return Err(Error::CustomError(format!(
             "Unmatched records found in dbn_records: {:?}",
             unmatched_dbn_records
-        )));
-    }
-
-    // Finally, check if mbn_records is empty
-    if !mbn_records.is_empty() {
-        return Err(Error::CustomError(format!(
-            "Unmatched records found in mbn_records: {:?}",
-            mbn_records
         )));
     }
 
@@ -113,28 +76,40 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    // #[ignore]
     async fn test_read_mbn_file() -> Result<()> {
         let file_path = PathBuf::from("tests/data/load_testing_file.bin");
 
         // Test
-        let records = read_mbn_file(&file_path, false).await?;
+        let mut decoder = read_mbn_file(&file_path).await?;
 
         // Validate
-        assert!(records.len() > 0);
+        let mbn_records = decoder.decode().await?;
+        assert!(mbn_records.len() > 0);
 
         Ok(())
     }
     #[tokio::test]
+    // #[ignore]
     async fn test_read_dbn_file() -> Result<()> {
         let file_path = PathBuf::from(
             "tests/data/databento/GLBX.MDP3_mbp-1_2024-08-20T00:00:00Z_2024-08-20T05:00:00Z.dbn",
         );
 
         // Test
-        let (records, _) = read_dbn_file(file_path).await?;
+        let (mut decoder, _) = read_dbn_file(file_path).await?;
 
         // Validate
-        assert!(records.len() > 0);
+        let _metadata = decoder.metadata();
+
+        // Decode to vector of messages
+        let mut dbn_records = Vec::new();
+        while let Some(record) = decoder.decode_record_ref().await? {
+            let record_enum = record.as_enum()?;
+            dbn_records.push(record_enum.to_owned());
+        }
+
+        assert!(dbn_records.len() > 0);
 
         Ok(())
     }
@@ -147,7 +122,7 @@ mod tests {
         );
 
         // Test
-        let x = compare_dbn(dbn_file_path, &mbn_file_path, false).await?;
+        let x = compare_dbn(dbn_file_path, &mbn_file_path).await?;
 
         // Validate
         assert!(x == ());
