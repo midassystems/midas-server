@@ -239,7 +239,6 @@ async fn test_compare_files() -> Result<()> {
             "tests/data/databento/GLBX.MDP3_ohlcv-1h_2024-01-02T00:00:00Z_2024-01-04T00:00:00Z.dbn"
                 .to_string(),
         mbn_filepath: "tests/data/midas/ohlcv1h_test.bin".to_string(),
-        mbn_metadata: true,
     };
 
     compare_command.process_command(&client).await?;
@@ -251,7 +250,6 @@ async fn test_compare_files() -> Result<()> {
             "tests/data/databento/GLBX.MDP3_trades_2024-01-02T00:00:00Z_2024-01-04T00:00:00Z.dbn"
                 .to_string(),
         mbn_filepath: "tests/data/midas/trades_test.bin".to_string(),
-        mbn_metadata: true,
     };
 
     compare_command.process_command(&client).await?;
@@ -263,7 +261,6 @@ async fn test_compare_files() -> Result<()> {
             "tests/data/databento/GLBX.MDP3_tbbo_2024-01-02T00:00:00Z_2024-01-04T00:00:00Z.dbn"
                 .to_string(),
         mbn_filepath: "tests/data/midas/tbbo_test.bin".to_string(),
-        mbn_metadata: true,
     };
 
     compare_command.process_command(&client).await?;
@@ -275,7 +272,6 @@ async fn test_compare_files() -> Result<()> {
             "tests/data/databento/GLBX.MDP3_bbo-1m_2024-01-02T00:00:00Z_2024-01-04T00:00:00Z.dbn"
                 .to_string(),
         mbn_filepath: "tests/data/midas/bbo1m_test.bin".to_string(),
-        mbn_metadata: true,
     };
 
     compare_command.process_command(&client).await?;

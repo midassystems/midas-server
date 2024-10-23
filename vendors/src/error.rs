@@ -47,6 +47,8 @@ pub enum Error {
     FileNotFoundError(String),
     #[error("Invalid DatabentoDownloadType")]
     InvalidDownloadType,
+    // #[error("Tokio io: {0}")]
+    // TokioError(#[from] tokio::io::Error),
 }
 
 impl Error {

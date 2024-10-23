@@ -8,7 +8,6 @@ use crate::databento::{
     client::{DatabentoClient, DatabentoDownloadType},
     extract::{read_dbn_batch_dir, read_dbn_file},
     load::load_file_to_db,
-    transform::find_duplicates,
     transform::{instrument_id_map, to_mbn},
 };
 use crate::error::{Error, Result};
@@ -141,13 +140,6 @@ pub async fn etl_pipeline(
     let _ = to_mbn(&mut records, &new_map, mbn_filepath).await?;
     let _ = drop(records);
     println!("MBN Path : {:?}", mbn_filepath);
-
-    // -- Check duplicates
-    // let num_duplicates = find_duplicates(&mbn_records);
-    // println!("Duplicates : {:?}", num_duplicates);
-
-    // -- To MBN file
-    // let _ = mbn_to_file(&mbn_records, &mbn_filepath).await?;
 
     // -- LOAD
     let mbn_filepath = &PathBuf::from("data/processed_data").join(mbn_filename);

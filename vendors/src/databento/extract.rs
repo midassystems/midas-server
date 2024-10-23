@@ -1,10 +1,10 @@
 use crate::error::Result;
-use async_compression::tokio::bufread::ZstdDecoder; // For zstd decompression
+use async_compression::tokio::bufread::ZstdDecoder;
 use databento::{dbn, historical::timeseries::AsyncDbnDecoder};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::fs::File;
-use tokio::io::BufReader; // For buffered reading
+use tokio::io::BufReader;
 use walkdir::WalkDir;
 
 pub fn symbol_map(metadata: &dbn::Metadata) -> Result<HashMap<String, String>> {
@@ -38,7 +38,6 @@ pub async fn read_dbn_file(
 }
 
 /// Read directory created by dbn batch job.
-/// Read directory created by dbn batch job.
 pub async fn read_dbn_batch_dir(
     dir_path: PathBuf,
 ) -> Result<(
@@ -49,7 +48,7 @@ pub async fn read_dbn_batch_dir(
     let mut files = Vec::new();
     for entry in WalkDir::new(dir_path)
         .into_iter()
-        .filter_map(|e| e.ok()) // Use a closure to handle errors
+        .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
     {
         files.push(entry.path().to_path_buf());
@@ -91,71 +90,6 @@ pub async fn read_dbn_batch_dir(
         ))
     }
 }
-
-// /// Read stream dbn file.
-// pub async fn read_dbn_file(filepath: PathBuf) -> Result<(Vec<Mbp1Msg>, HashMap<String, String>)> {
-//     // Read the file
-//     let mut decoder = AsyncDbnDecoder::from_zstd_file(filepath)
-//         .await
-//         .expect("Replace later.");
-//
-//     // Extract Symbol Map
-//     let metadata = decoder.metadata();
-//     let map = symbol_map(&metadata)?;
-//
-//     // Decode to vector of messages
-//     let mut records = Vec::new();
-//     while let Some(record) = decoder.decode_record::<Mbp1Msg>().await? {
-//         records.push(record.clone());
-//     }
-//
-//     Ok((records, map))
-// }
-
-// /// Read directory created by dbn batch job.
-// pub async fn read_dbn_batch_dir(
-//     dir_path: PathBuf,
-// ) -> Result<(Vec<Mbp1Msg>, HashMap<String, String>)> {
-//     // List files in batch dir
-//     let mut files = Vec::new();
-//     for entry in WalkDir::new(dir_path)
-//         .into_iter()
-//         .filter_map(|e| e.ok()) // Use a closure to handle errors
-//         .filter(|e| e.file_type().is_file())
-//     {
-//         files.push(entry.path().to_path_buf());
-//     }
-//
-//     // Read files into decoder
-//     let mut records = Vec::new();
-//     let mut symbol_map_hash = HashMap::new();
-//
-//     // Decode Files
-//     for downloaded_file in files {
-//         if let Some(extension) = downloaded_file.extension() {
-//             if extension == "zst" {
-//                 let mut decoder =
-//                     AsyncDbnDecoder::with_zstd(File::open(&downloaded_file).await?).await?;
-//
-//                 // Extract Symbol Map
-//                 let metadata = decoder.metadata();
-//                 let map = symbol_map(&metadata)?;
-//
-//                 // Merge the symbol map into the global map
-//                 for (id, ticker) in map {
-//                     symbol_map_hash.insert(id, ticker.clone());
-//                 }
-//
-//                 // Decode to vector of messages
-//                 while let Some(record) = decoder.decode_record::<Mbp1Msg>().await? {
-//                     records.push(record.clone());
-//                 }
-//             }
-//         }
-//     }
-//
-//     Ok((records, symbol_map_hash))
-// }
 
 #[cfg(test)]
 mod tests {
