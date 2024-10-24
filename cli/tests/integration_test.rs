@@ -27,7 +27,7 @@ async fn test_update() -> Result<()> {
     let client = Historical::new(URL);
 
     let update_command = cli::commands::databento::DatabentoCommands::Update {
-        tickers_filepath: TICKER_FILE.to_string(),
+        tickers_filepath: Some(TICKER_FILE.to_string()),
     };
 
     update_command.process_command(&client).await?;
@@ -123,7 +123,7 @@ async fn test_databento_upload() -> Result<()> {
             "tests/data/databento/GLBX.MDP3_mbp-1_2024-01-02T00:00:00Z_2024-01-04T00:00:00Z.dbn"
                 .to_string(),
         dbn_downloadtype: "stream".to_string(),
-        tickers_filepath: TICKER_FILE.to_string(),
+        tickers_filepath: Some(TICKER_FILE.to_string()),
         mbn_filepath: "GLBX.MDP3_continuous_2024-01-02_2024-01-04.bin".to_string(),
     };
 

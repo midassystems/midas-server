@@ -1,6 +1,6 @@
 use crate::cli::ProcessCommand;
 use crate::error::{Error, Result};
-use crate::TICKER_FILE;
+use crate::utils::get_ticker_file;
 use async_trait::async_trait;
 use clap::{Args, Subcommand};
 use databento::dbn::Schema;
@@ -54,8 +54,8 @@ pub struct DatabentoArgs {
 pub enum DatabentoCommands {
     /// Standard update, adds mbp for tickers already in the database for entire previous day.
     Update {
-        #[arg(long, default_value = TICKER_FILE)]
-        tickers_filepath: String,
+        #[arg(long)]
+        tickers_filepath: Option<String>,
     },
     /// Download databento data to file
     Download {
@@ -94,8 +94,8 @@ pub enum DatabentoCommands {
         dbn_downloadtype: String,
 
         /// Schema ex. Mbp1, Ohlcv
-        #[arg(long, default_value = TICKER_FILE)]
-        tickers_filepath: String,
+        #[arg(long)]
+        tickers_filepath: Option<String>,
 
         /// File path to save the downloaded binary data.
         #[arg(long)]
@@ -115,8 +115,15 @@ impl ProcessCommand for DatabentoCommands {
     async fn process_command(&self, client: &Historical) -> Result<()> {
         match self {
             DatabentoCommands::Update { tickers_filepath } => {
+                // let tickers_file;
+                let tickers_file = if let Some(tickers_filepath) = tickers_filepath {
+                    tickers_filepath.clone() // Use the provided tickers_filepath
+                } else {
+                    get_ticker_file()? // Use the default tickers file path from the utility function
+                };
+
                 // Update
-                let _ = vendors::databento::update(tickers_filepath, client).await?;
+                let _ = vendors::databento::update(&tickers_file, client).await?;
 
                 Ok(())
             }
@@ -157,11 +164,18 @@ impl ProcessCommand for DatabentoCommands {
                 let mbn_filepath = PathBuf::from(mbn_filepath);
                 let download_type = DatabentoDownloadType::try_from(dbn_downloadtype.as_str())?;
 
+                // let tickers_file;
+                let tickers_file = if let Some(tickers_filepath) = tickers_filepath {
+                    tickers_filepath.clone() // Use the provided tickers_filepath
+                } else {
+                    get_ticker_file()? // Use the default tickers file path from the utility function
+                };
+
                 // Update
                 let _ = vendors::databento::upload(
                     &dbn_filepath,
                     &download_type,
-                    tickers_filepath,
+                    &tickers_file,
                     &mbn_filepath,
                     &client,
                     None,

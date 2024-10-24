@@ -86,6 +86,10 @@ sudo chmod 755 "$RAW_DIR"
 sudo chmod 755 "$PROCESSED_DIR"
 sudo chmod 755 "$SCRIPTS_DIR"
 
+# Script dependencies
+sudo apt-get update
+sudo apt-get install jq
+
 # Optionally delete the repository directory (uncomment to enable)
 # echo "Cleaning up repository directory..."
 # sudo rm -rf /path/to/repo
