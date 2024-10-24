@@ -1,5 +1,6 @@
 use crate::cli::ProcessCommand;
 use crate::error::{Error, Result};
+use crate::TICKER_FILE;
 use async_trait::async_trait;
 use clap::{Args, Subcommand};
 use databento::dbn::Schema;
@@ -53,7 +54,7 @@ pub struct DatabentoArgs {
 pub enum DatabentoCommands {
     /// Standard update, adds mbp for tickers already in the database for entire previous day.
     Update {
-        #[arg(long, default_value = "config/tickers.json")]
+        #[arg(long, default_value = TICKER_FILE)]
         tickers_filepath: String,
     },
     /// Download databento data to file
@@ -93,7 +94,7 @@ pub enum DatabentoCommands {
         dbn_downloadtype: String,
 
         /// Schema ex. Mbp1, Ohlcv
-        #[arg(long, default_value = "config/tickers.json")]
+        #[arg(long, default_value = TICKER_FILE)]
         tickers_filepath: String,
 
         /// File path to save the downloaded binary data.

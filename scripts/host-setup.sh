@@ -6,9 +6,24 @@ DATA_DIR=/var/data
 RAW_DIR=/var/data/raw_data/
 PROCESSED_DIR=/var/data/processed_data/
 SCRIPTS_DIR=/opt/midas/scripts
+CONFIG_DIR=~/.config/midas
 
 # Create directories if they don't exist
 echo "Creating necessary directories for logs, data, and scripts..."
+
+# Create config directory
+if [ ! -d "$HOME/.config" ]; then
+	sudo mkdir -p "$HOME/.config"
+fi
+
+if [ ! -d "$CONFIG_DIR" ]; then
+	sudo mkdir -p "$CONFIG_DIR"
+	sudo chown "$USER":"$USER" "$CONFIG_DIR"
+	cp tickers_template.json "$CONFIG_DIR/tickers.json"
+	echo "Config directory set up."
+else
+	echo "Config directory already exists: $CONFIG_DIR"
+fi
 
 # Create log directory
 if [ ! -d "$LOG_DIR" ]; then
