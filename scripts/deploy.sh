@@ -51,7 +51,7 @@ elif [[ "$ENV" == "testing" ]]; then
 
 elif [[ "$ENV" == "production" ]]; then
 	# Production deployment
-	if docker-compose --env-file .env --profile production up --build -d; then
+	if docker-compose --profile production up --build -d; then
 		echo "Docker Compose deployment for production succeeded."
 	else
 		echo "Docker Compose deployment for production failed."
