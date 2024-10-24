@@ -10,6 +10,7 @@ deploy.txt
 *.bin
 /lib
 /bin
+/config
 
 sql_commands.txt
 test.sql

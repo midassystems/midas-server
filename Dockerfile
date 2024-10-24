@@ -39,7 +39,7 @@ WORKDIR /server
 
 # Create the necessary directories
 RUN mkdir -p /server/cli \
-             /server/config \
+             # /server/config \
              /server/database \
              /server/scripts \
              /server/services \
@@ -48,7 +48,7 @@ RUN mkdir -p /server/cli \
 
 # Copy the project files
 COPY ./server/cli /server/cli
-COPY ./server/config /server/config
+# COPY ./server/config /server/config
 COPY ./server/database /server/database
 COPY ./server/scripts /server/scripts
 COPY ./server/services /server/services
@@ -58,6 +58,8 @@ COPY ./server/.env /server/.env
 COPY ./server/docker-compose.yml /server/docker-compose.yml
 COPY ./server/Cargo.toml /server/Cargo.toml
 COPY ./server/Cargo.lock /server/Cargo.lock
+COPY ./server/tickers_template.json /server/tickers_template.json
+
 
 
 
