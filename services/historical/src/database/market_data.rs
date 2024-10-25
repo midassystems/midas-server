@@ -353,7 +353,7 @@ impl RecordsQuery for Mbp1Msg {
             AND ($4 IS FALSE OR m.action = 84)
             "#)
             .bind(params.start_ts)
-            .bind(params.end_ts)
+            .bind(params.end_ts - 1)
             .bind(symbol_array)
             .bind(tbbo_flag)
             .fetch(pool);
@@ -426,7 +426,7 @@ impl RecordsQuery for TradeMsg {
             ORDER BY m.ts_event
             "#)
             .bind(params.start_ts)
-            .bind(params.end_ts)
+            .bind(params.end_ts - 1)
             .bind(symbol_array)
             .fetch(pool);
 
@@ -501,7 +501,7 @@ impl RecordsQuery for BboMsg {
                 FROM mbp m
                 INNER JOIN instrument i ON m.instrument_id = i.id
                 LEFT JOIN bid_ask b ON m.id = b.mbp_id AND b.depth = 0
-                WHERE m.ts_recv BETWEEN $1 AND $2
+                WHERE m.ts_recv BETWEEN ($1 - 86400000000000) AND $2
                 AND i.ticker = ANY($4)
             ),
             -- Subquery to get the last trade event
@@ -560,7 +560,7 @@ impl RecordsQuery for BboMsg {
                 SELECT
                     f.instrument_id,
                     f.ts_event,
-                    f.ts_recv,
+                    CAST(f.ts_recv + $3 AS BIGINT) AS ts_recv,
                     find_last_ignore_nulls(f.last_trade_price) OVER (PARTITION BY f.instrument_id ORDER BY f.ts_recv) AS price,
                     find_last_ignore_nulls(f.last_trade_size) OVER (PARTITION BY f.instrument_id ORDER BY f.ts_recv) AS size,
                     find_last_ignore_nulls(f.last_trade_side) OVER (PARTITION BY f.instrument_id ORDER BY f.ts_recv) AS side,
@@ -577,7 +577,7 @@ impl RecordsQuery for BboMsg {
             SELECT
                 fp.instrument_id,
                 fp.ts_event,
-                CAST(fp.ts_recv + $3 AS BIGINT) AS ts_recv, -- The floored ts_recv used for grouping
+                fp.ts_recv,
                 fp.bid_px,
                 fp.ask_px,
                 fp.bid_sz,
@@ -592,6 +592,7 @@ impl RecordsQuery for BboMsg {
                 i.ticker
             FROM filled_price_size fp
             INNER JOIN instrument i ON fp.instrument_id = i.id
+            WHERE fp.ts_recv BETWEEN $1 AND ($2 - $3)
             ORDER BY fp.ts_recv;
             "#)
             .bind(params.start_ts)
