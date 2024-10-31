@@ -1,8 +1,7 @@
 use crate::Result;
 use async_trait::async_trait;
 use mbn::backtest::{
-    BacktestData, DailyTimeseriesStats, Parameters, PeriodTimeseriesStats, Signals, StaticStats,
-    Trades,
+    BacktestData, Parameters, SignalInstructions, Signals, StaticStats, TimeseriesStats, Trades,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use tracing::info;
@@ -114,7 +113,7 @@ impl ParametersQueries for Parameters {
     ) -> Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO Parameters (backtest_id, strategy_name, capital, data_type, schema, train_start, train_end, test_start, test_end, tickers)
+            INSERT INTO bt_Parameters (backtest_id, strategy_name, capital, data_type, schema, train_start, train_end, test_start, test_end, tickers)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             "#
         )
@@ -136,8 +135,8 @@ impl ParametersQueries for Parameters {
     async fn retrieve_query(pool: &PgPool, backtest_id: i32) -> Result<Self> {
         let result : Parameters = sqlx::query_as(
             r#"
-            SELECT strategy_name, capital, data_type, schema, train_start, train_end, test_start, test_end, tickers
-            FROM Parameters
+            SELECT strategy_name, capital, schema, data_type, train_start, train_end, test_start, test_end, tickers
+            FROM bt_Parameters
             WHERE backtest_id = $1
             "#
         )
@@ -170,7 +169,7 @@ impl StaticStatsQueries for StaticStats {
     ) -> Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO backtest_StaticStats (
+            INSERT INTO bt_StaticStats (
             backtest_id,
             total_trades,
             total_winning_trades,
@@ -253,7 +252,7 @@ impl StaticStatsQueries for StaticStats {
                 max_drawdown_percentage_daily,
                 sharpe_ratio,
             sortino_ratio            
-            FROM backtest_StaticStats
+            FROM bt_StaticStats
             WHERE backtest_id = $1
             "#,
         )
@@ -265,31 +264,53 @@ impl StaticStatsQueries for StaticStats {
     }
 }
 
+pub enum TimeseriesTypes {
+    DAILY,
+    PERIOD,
+}
+
+impl TimeseriesTypes {
+    fn to_table(&self) -> String {
+        match self {
+            TimeseriesTypes::DAILY => "bt_PeriodTimeseriesStats".to_string(),
+            TimeseriesTypes::PERIOD => "bt_DailyTimeseriesStats".to_string(),
+        }
+    }
+}
+
 #[async_trait]
 pub trait TimeseriesQueries {
     async fn insert_query(
         &self,
         tx: &mut Transaction<'_, Postgres>,
+        timeseries_type: TimeseriesTypes,
         backtest_id: i32,
     ) -> Result<()>;
-    async fn retrieve_query(pool: &PgPool, backtest_id: i32) -> Result<Vec<Self>>
+    async fn retrieve_query(
+        pool: &PgPool,
+        timeseries_type: TimeseriesTypes,
+        backtest_id: i32,
+    ) -> Result<Vec<Self>>
     where
         Self: Sized;
 }
 
 #[async_trait]
-impl TimeseriesQueries for PeriodTimeseriesStats {
+impl TimeseriesQueries for TimeseriesStats {
     async fn insert_query(
         &self,
         tx: &mut Transaction<'_, Postgres>,
+        timeseries_type: TimeseriesTypes,
         backtest_id: i32,
     ) -> Result<()> {
-        sqlx::query(
+        let table = timeseries_type.to_table();
+
+        sqlx::query(format!(
             r#"
-            INSERT INTO backtest_PeriodTimeseriesStats (backtest_id, timestamp, equity_value, percent_drawdown, cumulative_return, period_return) 
+            INSERT INTO {} (backtest_id, timestamp, equity_value, percent_drawdown, cumulative_return, period_return) 
             VALUES ($1, $2, $3, $4, $5, $6)
             "#
-        )
+        , &table).as_str())
         .bind(&backtest_id)
         .bind(&self.timestamp)
         .bind(&self.equity_value)
@@ -301,55 +322,20 @@ impl TimeseriesQueries for PeriodTimeseriesStats {
         Ok(())
     }
 
-    async fn retrieve_query(pool: &PgPool, backtest_id: i32) -> Result<Vec<Self>> {
-        let result : Vec<PeriodTimeseriesStats> = sqlx::query_as(
-            r#"
-            SELECT backtest_id, timestamp, equity_value, percent_drawdown, cumulative_return, period_return
-            FROM backtest_PeriodTimeseriesStats
-            WHERE backtest_id = $1
-            "#
-        )
-        .bind(backtest_id)
-        .fetch_all(pool)
-        .await?;
-
-        Ok(result)
-    }
-}
-
-#[async_trait]
-impl TimeseriesQueries for DailyTimeseriesStats {
-    async fn insert_query(
-        &self,
-        tx: &mut Transaction<'_, Postgres>,
+    async fn retrieve_query(
+        pool: &PgPool,
+        timeseries_type: TimeseriesTypes,
         backtest_id: i32,
-    ) -> Result<()> {
-        sqlx::query(
-            r#"
-            INSERT INTO backtest_DailyTimeseriesStats (backtest_id, timestamp, equity_value, percent_drawdown, cumulative_return, period_return)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            "#
-        )
-        .bind(&backtest_id)
-        .bind(&self.timestamp)
-        .bind(&self.equity_value)
-        .bind(&self.percent_drawdown)
-        .bind(&self.cumulative_return)
-        .bind(&self.period_return)
-        .execute(tx)
-        .await?;
-        Ok(())
-    }
+    ) -> Result<Vec<Self>> {
+        let table = timeseries_type.to_table();
 
-    async fn retrieve_query(pool: &PgPool, backtest_id: i32) -> Result<Vec<Self>> {
-        let result : Vec<DailyTimeseriesStats> = sqlx::query_as(
+        let result : Vec<TimeseriesStats> = sqlx::query_as(format!(
             r#"
             SELECT backtest_id, timestamp, equity_value, percent_drawdown, cumulative_return, period_return
-            FROM backtest_DailyTimeseriesStats
+            FROM {}
             WHERE backtest_id = $1
             "#
-
-        )
+        , &table).as_str())
         .bind(backtest_id)
         .fetch_all(pool)
         .await?;
@@ -379,7 +365,7 @@ impl TradesQueries for Trades {
     ) -> Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO backtest_Trade (backtest_id, trade_id, leg_id, timestamp, ticker, quantity, avg_price, trade_value, action, fees)
+            INSERT INTO bt_Trade (backtest_id, trade_id, leg_id, timestamp, ticker, quantity, avg_price, trade_value, action, fees)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             "#
         )
@@ -402,11 +388,72 @@ impl TradesQueries for Trades {
         let result : Vec<Trades> = sqlx::query_as(
             r#"
             SELECT backtest_id, trade_id, leg_id, timestamp, ticker, quantity, avg_price, trade_value, action, fees
-            FROM backtest_Trade
+            FROM bt_Trade
             WHERE backtest_id = $1
             "#
         )
         .bind(backtest_id)
+        .fetch_all(pool)
+        .await?;
+
+        Ok(result)
+    }
+}
+
+#[async_trait]
+pub trait SignalInstructionsQueries {
+    async fn insert_query(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        backtest_id: i32,
+        signal_id: i32,
+    ) -> Result<()>;
+    async fn retrieve_query(pool: &PgPool, backtest_id: i32, signal_id: i32) -> Result<Vec<Self>>
+    where
+        Self: Sized;
+}
+
+#[async_trait]
+impl SignalInstructionsQueries for SignalInstructions {
+    async fn insert_query(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        backtest_id: i32,
+        signal_id: i32,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO bt_SignalInstructions (backtest_id, signal_id, ticker, order_type, action, trade_id, leg_id, weight, quantity, limit_price, aux_price)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            "#
+        )
+        .bind(&backtest_id)
+        .bind(&signal_id)
+        .bind(&self.ticker)
+        .bind(&self.order_type)
+        .bind(&self.action)
+        .bind(&self.trade_id)
+        .bind(&self.leg_id)
+        .bind(&self.weight)
+        .bind(&self.quantity)
+        .bind(&self.limit_price)
+        .bind(&self.aux_price)
+        .execute(tx)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn retrieve_query(pool: &PgPool, backtest_id: i32, signal_id: i32) -> Result<Vec<Self>> {
+        let result : Vec<SignalInstructions> = sqlx::query_as(
+            r#"
+            SELECT ticker, order_type, action, trade_id, leg_id, weight, quantity, limit_price, aux_price
+            FROM bt_SignalInstructions
+            WHERE backtest_id = $1 AND signal_id = $2
+            "#
+        )
+        .bind(backtest_id)
+        .bind(signal_id)
         .fetch_all(pool)
         .await?;
 
@@ -420,7 +467,7 @@ pub trait SignalQueries {
         &self,
         tx: &mut Transaction<'_, Postgres>,
         backtest_id: i32,
-    ) -> Result<()>;
+    ) -> Result<i32>;
     async fn retrieve_query(pool: &PgPool, backtest_id: i32) -> Result<Vec<Self>>
     where
         Self: Sized;
@@ -432,26 +479,30 @@ impl SignalQueries for Signals {
         &self,
         tx: &mut Transaction<'_, Postgres>,
         backtest_id: i32,
-    ) -> Result<()> {
-        sqlx::query(
+    ) -> Result<i32> {
+        let result = sqlx::query(
             r#"
-            INSERT INTO backtest_Signal (backtest_id, timestamp, trade_instructions)
-            VALUES ($1, $2, $3)
+            INSERT INTO bt_Signal (backtest_id, timestamp)
+            VALUES ($1, $2)
+            RETURNING id
             "#,
         )
         .bind(&backtest_id)
         .bind(&self.timestamp)
-        .bind(&self.trade_instructions)
-        .execute(tx)
+        .fetch_one(tx)
         .await?;
-        Ok(())
+
+        // Extract the id directly from the row
+        let id: i32 = result.try_get("id")?;
+
+        Ok(id)
     }
 
     async fn retrieve_query(pool: &PgPool, backtest_id: i32) -> Result<Vec<Self>> {
-        let results: Vec<Signals> = sqlx::query_as(
+        let results = sqlx::query(
             r#"
-            SELECT id, timestamp, trade_instructions 
-            FROM backtest_Signal
+            SELECT id, timestamp 
+            FROM bt_Signal
             WHERE backtest_id = $1
             "#,
         )
@@ -459,7 +510,21 @@ impl SignalQueries for Signals {
         .fetch_all(pool)
         .await?;
 
-        Ok(results)
+        let mut signals = Vec::new();
+
+        for row in results {
+            let timestamp = row.try_get::<i64, _>("timestamp")?;
+            let signal_id = row.try_get::<i32, _>("id")?;
+            let trade_instructions =
+                SignalInstructions::retrieve_query(pool, backtest_id, signal_id).await?;
+
+            let signal = Signals {
+                timestamp,
+                trade_instructions,
+            };
+            signals.push(signal);
+        }
+        Ok(signals)
     }
 }
 
@@ -495,7 +560,9 @@ pub async fn create_backtest_related(
     );
     // Insert Period Timeseries Stats
     for period_stat in &backtest_data.period_timeseries_stats {
-        period_stat.insert_query(tx, backtest_id).await?;
+        period_stat
+            .insert_query(tx, TimeseriesTypes::PERIOD, backtest_id)
+            .await?;
     }
     info!(
         "Successfully inserted period timeseries stats for backtest id {}",
@@ -504,7 +571,9 @@ pub async fn create_backtest_related(
 
     // Insert Daily Timeseries Stats
     for daily_stat in &backtest_data.daily_timeseries_stats {
-        daily_stat.insert_query(tx, backtest_id).await?;
+        daily_stat
+            .insert_query(tx, TimeseriesTypes::DAILY, backtest_id)
+            .await?;
     }
     info!(
         "Successfully inserted daily timeseries stats for backtest id {}",
@@ -522,7 +591,13 @@ pub async fn create_backtest_related(
 
     // Insert Signal
     for signal in &backtest_data.signals {
-        signal.insert_query(tx, backtest_id).await.unwrap();
+        let signal_id = signal.insert_query(tx, backtest_id).await.unwrap();
+        for instruction in &signal.trade_instructions {
+            instruction
+                .insert_query(tx, backtest_id, signal_id)
+                .await
+                .unwrap();
+        }
     }
     info!(
         "Successfully inserted signals for backtest id {}",
@@ -539,11 +614,12 @@ pub async fn retrieve_backtest_related(pool: &PgPool, backtest_id: i32) -> Resul
     let backtest_name = BacktestData::retrieve_query(pool, backtest_id).await?;
     let parameters = Parameters::retrieve_query(pool, backtest_id).await?;
     let static_stats = StaticStats::retrieve_query(pool, backtest_id).await?;
-    let period_timeseries_stats = PeriodTimeseriesStats::retrieve_query(pool, backtest_id).await?;
-    let daily_timeseries_stats = DailyTimeseriesStats::retrieve_query(pool, backtest_id).await?;
+    let period_timeseries_stats =
+        TimeseriesStats::retrieve_query(pool, TimeseriesTypes::PERIOD, backtest_id).await?;
+    let daily_timeseries_stats =
+        TimeseriesStats::retrieve_query(pool, TimeseriesTypes::DAILY, backtest_id).await?;
     let trades = Trades::retrieve_query(pool, backtest_id).await?;
     let signals = Signals::retrieve_query(pool, backtest_id).await?;
-
     info!(
         "Successfully retrieved all related data for backtest id {}",
         backtest_id
@@ -620,9 +696,12 @@ mod test {
         let _ = transaction.commit().await;
 
         // Test
-        let _ = BacktestData::retrieve_list_query(&pool)
+        let result = BacktestData::retrieve_list_query(&pool)
             .await
             .expect("Error geting backtest list.");
+
+        // Validate
+        assert!(result.len() > 0);
 
         // Cleanup
         let mut transaction = pool
@@ -863,7 +942,7 @@ mod test {
         // Test
         for i in backtest_data.period_timeseries_stats {
             let result = i
-                .insert_query(&mut transaction, backtest_id)
+                .insert_query(&mut transaction, TimeseriesTypes::PERIOD, backtest_id)
                 .await
                 .expect("Error on insert.");
 
@@ -896,7 +975,7 @@ mod test {
 
         for i in &backtest_data.period_timeseries_stats {
             let _ = i
-                .insert_query(&mut transaction, backtest_id)
+                .insert_query(&mut transaction, TimeseriesTypes::PERIOD, backtest_id)
                 .await
                 .expect("Error on insert.");
         }
@@ -904,8 +983,8 @@ mod test {
         let _ = transaction.commit().await;
 
         // Test
-        let result: Vec<PeriodTimeseriesStats> =
-            PeriodTimeseriesStats::retrieve_query(&pool, backtest_id)
+        let result: Vec<TimeseriesStats> =
+            TimeseriesStats::retrieve_query(&pool, TimeseriesTypes::PERIOD, backtest_id)
                 .await
                 .expect("Error retriving static stats.");
 
@@ -950,7 +1029,7 @@ mod test {
         // Test
         for i in backtest_data.daily_timeseries_stats {
             let result = i
-                .insert_query(&mut transaction, backtest_id)
+                .insert_query(&mut transaction, TimeseriesTypes::DAILY, backtest_id)
                 .await
                 .expect("Error in daily timeseries.");
 
@@ -983,7 +1062,7 @@ mod test {
 
         for i in &backtest_data.daily_timeseries_stats {
             let _ = i
-                .insert_query(&mut transaction, backtest_id)
+                .insert_query(&mut transaction, TimeseriesTypes::DAILY, backtest_id)
                 .await
                 .expect("Error on insert.");
         }
@@ -991,8 +1070,8 @@ mod test {
         let _ = transaction.commit().await;
 
         // Test
-        let result: Vec<DailyTimeseriesStats> =
-            DailyTimeseriesStats::retrieve_query(&pool, backtest_id)
+        let result: Vec<TimeseriesStats> =
+            TimeseriesStats::retrieve_query(&pool, TimeseriesTypes::DAILY, backtest_id)
                 .await
                 .expect("Error retriving static stats.");
 
@@ -1097,7 +1176,7 @@ mod test {
     }
 
     #[sqlx::test]
-    async fn create_signals() {
+    async fn create_signals() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
         let mut transaction = pool
@@ -1117,15 +1196,20 @@ mod test {
             .expect("Error on insert.");
 
         // Test
-        for i in backtest_data.signals {
-            let result = i
-                .insert_query(&mut transaction, backtest_id)
-                .await
-                .expect("Error on signal create.");
+        for signal in &backtest_data.signals {
+            let signal_id = signal.insert_query(&mut transaction, backtest_id).await?;
 
-            // Validate
-            assert_eq!(result, ());
+            for instruction in &signal.trade_instructions {
+                let result = instruction
+                    .insert_query(&mut transaction, backtest_id, signal_id)
+                    .await
+                    .unwrap();
+
+                // Validate
+                assert_eq!(result, ());
+            }
         }
+        Ok(())
     }
 
     #[sqlx::test]
