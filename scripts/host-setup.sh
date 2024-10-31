@@ -90,6 +90,14 @@ sudo chmod 755 "$SCRIPTS_DIR"
 sudo apt-get update
 sudo apt-get install jq
 
+# Rsnap shot
+sudo apt update
+sudo apt install rsnapshot
+
+sudo mkdir -p /var/backup/rsnapshot
+sudo chown root:root /backup/rsnapshot
+sudo chmod 700 /backup/rsnapshot
+
 # Optionally delete the repository directory (uncomment to enable)
 # echo "Cleaning up repository directory..."
 # sudo rm -rf /path/to/repo
