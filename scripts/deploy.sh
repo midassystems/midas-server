@@ -33,7 +33,7 @@ echo "Running Docker Compose deployment for $ENV..."
 
 if [[ "$ENV" == "dev" ]]; then
 	# Development deployment (most basic)
-	if docker-compose --env-file .env.dev --profile dev up --build -d; then
+	if docker compose --env-file .env.dev --profile dev up --build -d; then
 		echo "Docker Compose deployment for development succeeded."
 	else
 		echo "Docker Compose deployment for development failed."
@@ -42,7 +42,7 @@ if [[ "$ENV" == "dev" ]]; then
 
 elif [[ "$ENV" == "testing" ]]; then
 	# Testing deployment
-	if docker-compose --env-file .env --profile dev up --build -d; then
+	if docker compose --env-file .env --profile dev up --build -d; then
 		echo "Docker Compose deployment for testing succeeded."
 	else
 		echo "Docker Compose deployment for testing failed."
@@ -51,7 +51,7 @@ elif [[ "$ENV" == "testing" ]]; then
 
 elif [[ "$ENV" == "production" ]]; then
 	# Production deployment
-	if docker-compose --profile production up --build -d; then
+	if docker compose --profile production up --build -d; then
 		echo "Docker Compose deployment for production succeeded."
 	else
 		echo "Docker Compose deployment for production failed."
