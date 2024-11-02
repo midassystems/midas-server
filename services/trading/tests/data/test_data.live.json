@@ -1,55 +1,78 @@
-positon_data = {
-  "data" : {
-      "action" : "BUY",
-      "avg_cost" : 150,
-      "quantity" : 100,
-      "total_cost" : 15000.00,
-      "market_value" : 160000.11,
-      "multiplier" : 1, 
-      "initial_margin" : 0.0,
-      "ticker" : "AAPL",
-      "price" : 160
-  }
-}
-
-account_data ={
-  "data" : {
-      "Timestamp" : "2024-01-01",
-      "FullAvailableFunds" : 1000.99,
-      "FullInitMarginReq" : 99980.99,
-      "NetLiquidation" : 99.98,
-      "UnrealizedPnL" : 1000.9,
-      "FullMaintMarginReq" : 86464.39,
-      "ExcessLiquidity" : 99333.99,
-      "Currency" : "USD",
-      "BuyingPower" : 777.89,
-      "FuturesPNL" : 564837.99,
-      "TotalCashBalance" : 999.99
-  }
-}
-
-order_data = {
-  "data" : {
-      "permId" : 1,
-      "clientId" : 22,
-      "orderId" : 5,
-      "parentId" : 5,
-      "account": "DU12546",
-      "symbol" : "AAPL",
-      "secType" : "STK",
-      "exchange": "NASDAQ",
-      "action" : "BUY",
-      "orderType" : "MKT",
-      "totalQty" : 1009.90,
-      "cashQty" : 109.99,
-      "lmtPrice" : 0.0,
-      "auxPrice" : 0.0,
-      "status" : "Submitted",
-      "filled" : "9",
-      "remaining" : 10,
-      "avgFillPrice" : 100, 
-      "lastFillPrice": 100,
-      "whyHeld" : "",
-      "mktCapPrice" : 1000.99
+{
+  "parameters": {
+    "strategy_name": "cointegrationzscore",
+    "capital": 100000,
+    "data_type": "BAR",
+    "schema": "ohlcv-1h",
+    "train_start": 1704862800,
+    "train_end": 1704893000,
+    "test_start": 1704903000,
+    "test_end": 1705903000,
+    "tickers": ["AAPL", "MSFT"]
+  },
+  "trades": [
+    {
+      "trade_id": 1,
+      "leg_id": 1,
+      "timestamp": 1704903000,
+      "ticker": "AAPL",
+      "quantity": 4,
+      "avg_price": 13074,
+      "trade_value": -52296,
+      "action": "BUY",
+      "fees": 0
+    }
+  ],
+  "signals": [
+    {
+      "timestamp": 1704903000,
+      "trade_instructions": [
+        {
+          "ticker": "AAPL",
+          "order_type": "MKT",
+          "action": "BUY",
+          "trade_id": 1,
+          "leg_id": 1,
+          "weight": 5,
+          "quantity": 10,
+          "limit_price": "12345",
+          "aux_price": "234"
+        },
+        {
+          "ticker": "MSFT",
+          "order_type": "MKT",
+          "action": "SELL",
+          "trade_id": 1,
+          "leg_id": 2,
+          "weight": 5,
+          "quantity": 10,
+          "limit_price": "12345",
+          "aux_price": "234"
+        }
+      ]
+    }
+  ],
+  "account": {
+    "currency": "USD",
+    "start_buying_power": 2557567,
+    "start_excess_liquidity": 767270,
+    "start_full_available_funds": 767270,
+    "start_full_init_margin_req": 2823937,
+    "start_full_maint_margin_req": 2823938,
+    "start_futures_pnl": -464883,
+    "start_net_liquidation": 767552392,
+    "start_total_cash_balance": -11292332,
+    "start_unrealized_pnl": 0,
+    "start_timestamp": 1704903000,
+    "end_buying_power": 25355889282,
+    "end_excess_liquidity": 762034292,
+    "end_full_available_funds": 760676292,
+    "end_full_init_margin_req": 707499,
+    "end_full_maint_margin_req": 5716009,
+    "end_futures_pnl": -487998,
+    "end_net_liquidation": 767751998,
+    "end_total_cash_balance": 76693599,
+    "end_unrealized_pnl": -2899,
+    "end_timestamp": 1704904000
   }
 }

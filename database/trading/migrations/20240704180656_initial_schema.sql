@@ -134,6 +134,153 @@ CREATE TABLE bt_SignalInstructions (
         ON DELETE CASCADE
 );
 
+-- Live Trading Results --
+CREATE TABLE Live (
+    id SERIAL PRIMARY KEY,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+CREATE TABLE lv_Parameters (
+    id SERIAL PRIMARY KEY,
+    live_id INTEGER NOT NULL,
+    strategy_name VARCHAR(255) NOT NULL,
+    capital BIGINT NOT NULL, 
+    schema VARCHAR(10),
+    data_type VARCHAR(10) NOT NULL,
+    train_start BIGINT NOT NULL,
+    train_end BIGINT NOT NULL,
+    test_start BIGINT NOT NULL,
+    test_end BIGINT NOT NULL,
+    tickers  TEXT[] NOT NULL,
+    CONSTRAINT fk_lv_parameters
+      FOREIGN KEY(live_id) 
+        REFERENCES Live(id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE lv_Trade (
+    id SERIAL PRIMARY KEY,
+    live_id INTEGER NOT NULL,
+    trade_id INTEGER NOT NULL,
+    leg_id INTEGER NOT NULL,
+    timestamp BIGINT NOT NULL,
+    ticker VARCHAR(50) NOT NULL,
+    quantity BIGINT NOT NULL,
+    avg_price BIGINT NOT NULL,
+    trade_value BIGINT NOT NULL,
+    action VARCHAR(10) NOT NULL,
+    fees BIGINT NOT NULL,
+    CONSTRAINT fk_lv_trade
+      FOREIGN KEY(live_id) 
+        REFERENCES Live(id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE lv_Signal (
+    id SERIAL PRIMARY KEY,
+    live_id INTEGER NOT NULL,
+    timestamp BIGINT NOT NULL,
+    CONSTRAINT fk_lv_signal
+        FOREIGN KEY(live_id) 
+            REFERENCES Live(id)
+            ON DELETE CASCADE
+);
+
+CREATE TABLE lv_SignalInstructions (
+    id SERIAL PRIMARY KEY,
+    live_id INTEGER NOT NULL,
+    signal_id INTEGER NOT NULL,
+    ticker VARCHAR(100) NOT NULL,
+    order_type VARCHAR(25) NOT NULL,
+    action VARCHAR(10) NOT NULL,
+    trade_id INTEGER NOT NULL,
+    leg_id INTEGER NOT NULL,
+    weight BIGINT NOT NULL,
+    quantity INTEGER NOT NULL,
+    limit_price VARCHAR(50) NOT NULL,
+    aux_price VARCHAR(50) NOT NULL,
+    CONSTRAINT fk_lv_id
+      FOREIGN KEY(live_id)
+        REFERENCES Live(id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_signal_id
+      FOREIGN KEY(signal_id)
+        REFERENCES lv_Signal(id)
+        ON DELETE CASCADE
+);
+
+CREATE TABLE lv_AccountSummary (
+  id SERIAL PRIMARY KEY,
+  live_id INTEGER NOT NULL,
+  currency VARCHAR(4) NOT NULL,
+  start_timestamp BIGINT,
+  start_buying_power BIGINT NOT NULL,
+  start_excess_liquidity BIGINT NOT NULL,
+  start_full_available_funds BIGINT NOT NULL,
+  start_full_init_margin_req BIGINT NOT NULL,
+  start_full_maint_margin_req BIGINT NOT NULL,
+  start_futures_pnl BIGINT NOT NULL,
+  start_net_liquidation BIGINT NOT NULL,
+  start_total_cash_balance BIGINT NOT NULL,
+  start_unrealized_pnl BIGINT NOT NULL,
+  end_timestamp BIGINT,
+  end_buying_power BIGINT NOT NULL,
+  end_excess_liquidity BIGINT NOT NULL,
+  end_full_available_funds BIGINT NOT NULL,
+  end_full_init_margin_req BIGINT NOT NULL,
+  end_full_maint_margin_req BIGINT NOT NULL,
+  end_futures_pnl BIGINT NOT NULL,
+  end_net_liquidation BIGINT NOT NULL,
+  end_total_cash_balance BIGINT NOT NULL,
+  end_unrealized_pnl BIGINT NOT NULL,
+  CONSTRAINT fk_lv_account_summary
+    FOREIGN KEY(live_id) 
+      REFERENCES Live(id)
+      ON DELETE CASCADE
+);
+
+-- other -- 
+-- CREATE TABLE lv_Signal (
+--     id SERIAL PRIMARY KEY,
+--     live_session_id INTEGER NOT NULL,
+--     timestamp BIGINT,
+--     CONSTRAINT fk_live_session_signal
+--         FOREIGN KEY(live_session_id) 
+--             REFERENCES LiveSession(id)
+--             ON DELETE CASCADE
+-- );
+--
+-- CREATE TABLE livesession_TradeInstruction (
+--     id SERIAL PRIMARY KEY,
+--     signal_id INTEGER NOT NULL,
+--     ticker VARCHAR(100) NOT NULL,
+--     action VARCHAR(10) NOT NULL,
+--     trade_id INTEGER NOT NULL,
+--     leg_id INTEGER NOT NULL,
+--     weight FLOAT NOT NULL,
+--     CONSTRAINT fk_signal_trade_instruction
+--         FOREIGN KEY(signal_id) 
+--             REFERENCES livesession_Signal(id)
+--             ON DELETE CASCADE
+-- );
+--
+-- CREATE TABLE livesession_Trade (
+--     id SERIAL PRIMARY KEY,
+--     live_session_id INTEGER NOT NULL,
+--     timestamp BIGINT,
+--     ticker VARCHAR(50) NOT NULL,
+--     quantity DECIMAL(10, 4) NOT NULL,
+--     avg_price DECIMAL(10, 4) DEFAULT 0.0 NOT NULL,
+--     trade_value DECIMAL(15, 4) DEFAULT 0.0 NOT NULL,
+--     action VARCHAR(10) NOT NULL,
+--     fees DECIMAL(10, 4) NOT NULL,
+--     CONSTRAINT fk_live_session_trade
+--         FOREIGN KEY(live_session_id) 
+--             REFERENCES LiveSession(id)
+--             ON DELETE CASCADE
+-- );
+
+
 -- Live Session -- 
 -- CREATE TABLE Session (
 --     session_id BIGINT PRIMARY KEY UNIQUE
@@ -190,92 +337,6 @@ CREATE TABLE bt_SignalInstructions (
 
 
 
---
--- -- Trading Results --
--- CREATE TABLE LiveSession (
---     id SERIAL PRIMARY KEY,
---     strategy_name VARCHAR(255) NOT NULL,
---     tickers JSONB DEFAULT '[]'::jsonb NOT NULL,
---     benchmark JSONB DEFAULT '[]'::jsonb NOT NULL,
---     data_type VARCHAR(10) NOT NULL,
---     train_start BIGINT,
---     train_end BIGINT,
---     test_start BIGINT,
---     test_end BIGINT,
---     capital FLOAT,
---     strategy_allocation FLOAT,
---     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
--- );
---
---
--- CREATE TABLE livesession_Signal (
---     id SERIAL PRIMARY KEY,
---     live_session_id INTEGER NOT NULL,
---     timestamp BIGINT,
---     CONSTRAINT fk_live_session_signal
---         FOREIGN KEY(live_session_id) 
---             REFERENCES LiveSession(id)
---             ON DELETE CASCADE
--- );
---
--- CREATE TABLE livesession_TradeInstruction (
---     id SERIAL PRIMARY KEY,
---     signal_id INTEGER NOT NULL,
---     ticker VARCHAR(100) NOT NULL,
---     action VARCHAR(10) NOT NULL,
---     trade_id INTEGER NOT NULL,
---     leg_id INTEGER NOT NULL,
---     weight FLOAT NOT NULL,
---     CONSTRAINT fk_signal_trade_instruction
---         FOREIGN KEY(signal_id) 
---             REFERENCES livesession_Signal(id)
---             ON DELETE CASCADE
--- );
---
--- CREATE TABLE livesession_Trade (
---     id SERIAL PRIMARY KEY,
---     live_session_id INTEGER NOT NULL,
---     timestamp BIGINT,
---     ticker VARCHAR(50) NOT NULL,
---     quantity DECIMAL(10, 4) NOT NULL,
---     avg_price DECIMAL(10, 4) DEFAULT 0.0 NOT NULL,
---     trade_value DECIMAL(15, 4) DEFAULT 0.0 NOT NULL,
---     action VARCHAR(10) NOT NULL,
---     fees DECIMAL(10, 4) NOT NULL,
---     CONSTRAINT fk_live_session_trade
---         FOREIGN KEY(live_session_id) 
---             REFERENCES LiveSession(id)
---             ON DELETE CASCADE
--- );
--- CREATE TABLE livesession_AccountSummary (
---     id SERIAL PRIMARY KEY,
---     live_session_id INTEGER NOT NULL,
---     currency VARCHAR(4) NOT NULL,
---     start_timestamp BIGINT,
---     start_buying_power DECIMAL(15, 4) NOT NULL,
---     start_excess_liquidity DECIMAL(15, 4) NOT NULL,
---     start_full_available_funds DECIMAL(15, 4) NOT NULL,
---     start_full_init_margin_req DECIMAL(15, 4) NOT NULL,
---     start_full_maint_margin_req DECIMAL(15, 4) NOT NULL,
---     start_futures_pnl DECIMAL(15, 4) NOT NULL,
---     start_net_liquidation DECIMAL(15, 4) NOT NULL,
---     start_total_cash_balance DECIMAL(15, 4) NOT NULL,
---     start_unrealized_pnl DECIMAL(15, 4) NOT NULL,
---     end_timestamp BIGINT,
---     end_buying_power DECIMAL(15, 4) NOT NULL,
---     end_excess_liquidity DECIMAL(15, 4) NOT NULL,
---     end_full_available_funds DECIMAL(15, 4) NOT NULL,
---     end_full_init_margin_req DECIMAL(15, 4) NOT NULL,
---     end_full_maint_margin_req DECIMAL(15, 4) NOT NULL,
---     end_futures_pnl DECIMAL(15, 4) NOT NULL,
---     end_net_liquidation DECIMAL(15, 4) NOT NULL,
---     end_total_cash_balance DECIMAL(15, 4) NOT NULL,
---     end_unrealized_pnl DECIMAL(16, 4) NOT NULL,
---     CONSTRAINT fk_live_session_account_summary
---         FOREIGN KEY(live_session_id) 
---             REFERENCES LiveSession(id)
---             ON DELETE CASCADE
--- );
 --  
 -- -- Regression Analysis -- 
 -- CREATE TABLE RegressionAnalysis (
