@@ -105,9 +105,10 @@ mod tests {
         let start = time::macros::datetime!(2024-08-20 00:00 UTC);
         let end = time::macros::datetime!(2024-08-20 05:00 UTC);
         let schema = Schema::Mbp1;
+        let symbols = vec!["ZM.n.0".to_string(), "GC.n.0".to_string()];
 
         // Construct file path
-        let file_path = databento_file_path(dir_path, &dataset, &schema, &start, &end)?;
+        let file_path = databento_file_path(dir_path, &dataset, &schema, &start, &end, &symbols)?;
 
         Ok(file_path)
     }

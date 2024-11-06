@@ -13,19 +13,22 @@ use std::time::Duration;
 use time::OffsetDateTime;
 use tokio::io::AsyncReadExt;
 
-/// Create the file path for the raw download from databento.
+/// Create the file path for the raw download from databento, including symbols in the file name.
 pub fn databento_file_path(
     dir_path: &PathBuf,
     dataset: &Dataset,
     schema: &Schema,
     start: &OffsetDateTime,
     end: &OffsetDateTime,
+    symbols: &Vec<String>,
 ) -> Result<PathBuf> {
+    // Join symbols with an underscore to include in the file name
+    let symbols_str = symbols.join("_");
     let file_path = dir_path.join(format!(
-        "{}_{}_{}_{}.dbn",
-        // dir_path,
+        "{}_{}_{}_{}_{}.dbn",
         dataset.as_str(),
         schema.as_str(),
+        symbols_str,
         start.format(&time::format_description::well_known::Rfc3339)?,
         end.format(&time::format_description::well_known::Rfc3339)?
     ));
@@ -256,8 +259,14 @@ impl DatabentoClient {
         if size < 5.0 {
             println!("Download size is {}GB : Stream Downloading.", size);
             download_type = DatabentoDownloadType::Stream;
-            file_path =
-                databento_file_path(&dir_path.join("databento"), &dataset, &schema, &start, &end)?;
+            file_path = databento_file_path(
+                &dir_path.join("databento"),
+                &dataset,
+                &schema,
+                &start,
+                &end,
+                &symbols,
+            )?;
 
             let _ = self
                 .fetch_historical_stream_to_file(
@@ -273,6 +282,7 @@ impl DatabentoClient {
                 &schema,
                 &start,
                 &end,
+                &symbols,
             )?;
 
             let _ = self
@@ -358,6 +368,7 @@ mod tests {
             &schema,
             &start,
             &end,
+            &symbols,
         )
         .expect("Error creatign file_path");
         let _ = client
@@ -382,6 +393,7 @@ mod tests {
             &schema,
             &start,
             &end,
+            &symbols,
         )
         .expect("Error creatign file_path");
 
