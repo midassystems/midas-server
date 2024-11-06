@@ -33,9 +33,10 @@ mod tests {
         let start = time::macros::datetime!(2024-08-20 00:00 UTC);
         let end = time::macros::datetime!(2024-08-20 05:00 UTC);
         let schema = Schema::Mbp1;
+        let symbols = vec!["ZM.n.0".to_string(), "GC.n.0".to_string()];
 
         // Construct file path
-        let file_path = databento_file_path(dir_path, &dataset, &schema, &start, &end)?;
+        let file_path = databento_file_path(dir_path, &dataset, &schema, &start, &end, &symbols)?;
 
         Ok(file_path)
     }
@@ -50,24 +51,21 @@ mod tests {
         // Create Instruments
         let (mbn_map, _grouped_tickers) =
             get_tickers("tests/tickers.json", "databento", &client).await?;
+        println!("{:?}", mbn_map);
 
         // Load DBN file
         let file_path = setup(&PathBuf::from("tests/data/databento"))?;
         // let file_path = setup("tests/data/databento").unwrap();
-        let (mut records, map) = read_dbn_file(file_path).await?;
+        let (mut records, dbn_map) = read_dbn_file(file_path).await?;
 
         // Create the new map
-        let new_map = instrument_id_map(map, mbn_map.clone())?;
-
-        // Convert Records oto MBN
-        let mbn_file_name = PathBuf::from("../data/load_testing_file.bin");
-        let _ = to_mbn(&mut records, &new_map, &mbn_file_name).await?; // Now you have new_map = {id: mbn_id}
-
-        // -- To MBN file
-        // let _ = mbn_to_file(&mbn_records, &mbn_file_name).await?;
+        let new_map = instrument_id_map(dbn_map, mbn_map.clone())?;
+        let mbn_file_name = PathBuf::from("../data/testing_file.bin");
+        let _ = to_mbn(&mut records, &new_map, &mbn_file_name).await?;
+        let _ = drop(records);
 
         // Test
-        let path = PathBuf::from("data/load_testing_file.bin");
+        let path = PathBuf::from("data/testing_file.bin");
         let _ = load_file_to_db(&path, &client).await?;
 
         // Cleanup

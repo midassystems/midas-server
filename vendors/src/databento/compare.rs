@@ -93,7 +93,7 @@ mod tests {
     // #[ignore]
     async fn test_read_dbn_file() -> Result<()> {
         let file_path = PathBuf::from(
-            "tests/data/databento/GLBX.MDP3_mbp-1_2024-08-20T00:00:00Z_2024-08-20T05:00:00Z.dbn",
+            "tests/data/databento/GLBX.MDP3_mbp-1_ZM.n.0_GC.n.0_2024-08-20T00:00:00Z_2024-08-20T05:00:00Z.dbn",
         );
 
         // Test
@@ -118,7 +118,7 @@ mod tests {
     async fn test_compare_dbn() -> Result<()> {
         let mbn_file_path = PathBuf::from("tests/data/load_testing_file.bin");
         let dbn_file_path = PathBuf::from(
-            "tests/data/databento/GLBX.MDP3_mbp-1_2024-08-20T00:00:00Z_2024-08-20T05:00:00Z.dbn",
+            "tests/data/databento/GLBX.MDP3_mbp-1_ZM.n.0_GC.n.0_2024-08-20T00:00:00Z_2024-08-20T05:00:00Z.dbn",
         );
 
         // Test
