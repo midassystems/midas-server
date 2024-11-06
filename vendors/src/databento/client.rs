@@ -239,18 +239,22 @@ impl DatabentoClient {
             .check_cost(&dataset, &start, &end, &symbols, &schema, &stype)
             .await?;
 
+        // Size check
+        let size = self
+            .check_size(&dataset, &start, &end, &symbols, &schema, &stype)
+            .await?;
+
         // Check with user before proceeding
-        println!("The estimated cost for this operation is: $ {}", cost);
+        println!(
+            "Download size is : {} GB.\nEstimated cost is : $ {}\n",
+            size, cost
+        );
+        // println!("The estimated cost for this operation is: $ {}", cost);
         let proceed = user_input()?;
         if proceed == false {
             return Ok(None);
         }
         println!("Operation is continuing...");
-
-        // Size check
-        let size = self
-            .check_size(&dataset, &start, &end, &symbols, &schema, &stype)
-            .await?;
 
         // Dynamic load based on size
         let download_type;
