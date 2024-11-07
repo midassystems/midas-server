@@ -3,7 +3,6 @@ pub mod compare;
 pub mod extract;
 pub mod load;
 pub mod transform;
-
 use crate::databento::{
     client::{DatabentoClient, DatabentoDownloadType},
     extract::{read_dbn_batch_dir, read_dbn_file},
@@ -19,6 +18,7 @@ use std::env;
 use std::path::PathBuf;
 use std::str::FromStr;
 use time::{self, OffsetDateTime};
+use tokio::fs;
 
 pub async fn update(tickers_filepath: &str, client: &Historical) -> Result<()> {
     // Load ticker file
@@ -155,8 +155,15 @@ async fn etl(
     println!("MBN Path : {:?}", mbn_filepath);
 
     // -- LOAD
-    let mbn_filepath = &PathBuf::from("data/processed_data").join(mbn_filename);
-    let _ = load_file_to_db(&mbn_filepath, client).await?;
+    let filepath = &PathBuf::from("data/processed_data").join(mbn_filename);
+    let _ = load_file_to_db(&filepath, client).await?;
+
+    // -- CLEAN
+    if let Err(e) = fs::remove_file(&mbn_filepath).await {
+        eprintln!("Failed to delete MBN file: {:?}", e);
+    } else {
+        println!("MBN file deleted successfully: {:?}", mbn_filepath);
+    }
 
     Ok(())
 }
