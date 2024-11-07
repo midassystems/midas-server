@@ -7,6 +7,8 @@ RAW_DIR=/var/data/raw_data/
 PROCESSED_DIR=/var/data/processed_data/
 SCRIPTS_DIR=/var/midas/scripts
 CONFIG_DIR=~/.config/midas
+BIN_DIR=/var/midas/bin
+LIB_DIR=/var/midas/lib
 
 # Create directories if they don't exist
 echo "Creating necessary directories for logs, data, and scripts..."
@@ -65,6 +67,24 @@ else
 fi
 
 # Create scripts directory
+if [ ! -d "$BIN_DIR" ]; then
+	sudo mkdir -p "$BIN_DIR"
+	sudo chown "$USER":"$USER" "$BIN_DIR"
+	echo "Binary directory created: $BIN_DIR"
+else
+	echo "Binary directory already exists: $BIN_DIR"
+fi
+
+# Create scripts directory
+if [ ! -d "$LIB_DIR" ]; then
+	sudo mkdir -p "$LIB_DIR"
+	sudo chown "$USER":"$USER" "$LIB_DIR"
+	echo "Library directory created: $LIB_DIR"
+else
+	echo "Library directory already exists: $LIB_DIR"
+fi
+
+# Create scripts directory
 if [ ! -d "$SCRIPTS_DIR" ]; then
 	sudo mkdir -p "$SCRIPTS_DIR"
 	sudo chown "$USER":"$USER" "$SCRIPTS_DIR"
@@ -85,5 +105,7 @@ sudo chmod 755 "$DATA_DIR"
 sudo chmod 755 "$RAW_DIR"
 sudo chmod 755 "$PROCESSED_DIR"
 sudo chmod 755 "$SCRIPTS_DIR"
+sudo chmod 755 "$BIN_DIR"
+sudo chmod 755 "$LIB_DIR"
 
 echo "Host setup completed."
