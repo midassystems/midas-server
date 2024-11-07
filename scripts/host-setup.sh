@@ -5,7 +5,7 @@ LOG_DIR=/var/log/midas
 DATA_DIR=/var/data
 RAW_DIR=/var/data/raw_data/
 PROCESSED_DIR=/var/data/processed_data/
-SCRIPTS_DIR=/opt/midas/scripts
+SCRIPTS_DIR=/var/midas/scripts
 CONFIG_DIR=~/.config/midas
 
 # Create directories if they don't exist
