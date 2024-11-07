@@ -122,16 +122,29 @@ pub async fn etl_pipeline(
     mbn_filename: &PathBuf,
     client: &Historical,
 ) -> Result<()> {
+    if download_type == &DatabentoDownloadType::Stream {
+        let _ = etl(&mbn_map, download_path, mbn_filename, client).await?;
+    } else {
+        let files = read_dbn_batch_dir(download_path).await?;
+        for file in files {
+            let _ = etl(&mbn_map, &file, mbn_filename, client).await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn etl(
+    mbn_map: &HashMap<String, u32>,
+    dbn_path: &PathBuf,
+    mbn_filename: &PathBuf,
+    client: &Historical,
+) -> Result<()> {
     let processed_dir = env::var("PROCESSED_DIR").expect("PROCESSED_DIR not set.");
 
-    // -- EXTRACT
     let mut records;
     let dbn_map;
-    if download_type == &DatabentoDownloadType::Stream {
-        (records, dbn_map) = read_dbn_file(download_path.clone()).await?;
-    } else {
-        (records, dbn_map) = read_dbn_batch_dir(download_path.clone()).await?;
-    }
+    (records, dbn_map) = read_dbn_file(dbn_path.clone()).await?;
 
     // -- TRANSFORM
     // Map DBN instrument to MBN insturment
@@ -147,6 +160,39 @@ pub async fn etl_pipeline(
 
     Ok(())
 }
+
+// pub async fn etl_pipeline(
+//     mbn_map: HashMap<String, u32>,
+//     download_type: &DatabentoDownloadType,
+//     download_path: &PathBuf,
+//     mbn_filename: &PathBuf,
+//     client: &Historical,
+// ) -> Result<()> {
+//     // let processed_dir = env::var("PROCESSED_DIR").expect("PROCESSED_DIR not set.");
+//     //
+//     // // -- EXTRACT
+//     // let mut records;
+//     // let dbn_map;
+//     if download_type == &DatabentoDownloadType::Stream {
+//         (records, dbn_map) = read_dbn_file(download_path.clone()).await?;
+//     } else {
+//         (records, dbn_map) = read_dbn_batch_dir(download_path.clone()).await?;
+//     }
+//
+//     // -- TRANSFORM
+//     // Map DBN instrument to MBN insturment
+//     let mbn_filepath = &PathBuf::from(processed_dir).join(mbn_filename);
+//     let new_map = instrument_id_map(dbn_map, mbn_map.clone())?;
+//     let _ = to_mbn(&mut records, &new_map, mbn_filepath).await?;
+//     let _ = drop(records);
+//     println!("MBN Path : {:?}", mbn_filepath);
+//
+//     // -- LOAD
+//     let mbn_filepath = &PathBuf::from("data/processed_data").join(mbn_filename);
+//     let _ = load_file_to_db(&mbn_filepath, client).await?;
+//
+//     Ok(())
+// }
 
 #[cfg(test)]
 mod tests {
