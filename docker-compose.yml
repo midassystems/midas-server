@@ -152,7 +152,11 @@ volumes:
       type: none
       device: ${SCRIPTS_DIR}
   postgres_data:
-
+    driver: local
+    driver_opts:
+      o: bind
+      type: none
+      device: ${POSTGRES_DIR}/data  # Custom directory for Postgres data
 
 
 

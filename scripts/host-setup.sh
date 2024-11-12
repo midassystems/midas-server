@@ -1,14 +1,15 @@
 #!/bin/bash
 
 # Define directories
-LOG_DIR=/var/log/midas
-DATA_DIR=/var/data
-RAW_DIR=/var/data/raw_data/
-PROCESSED_DIR=/var/data/processed_data/
-SCRIPTS_DIR=/var/midas/scripts
+LOG_DIR=/opt/midas/logs
+DATA_DIR=/opt/midas/data
+RAW_DIR=/opt/midas/data/raw_data/
+PROCESSED_DIR=/opt/midas/data/processed_data/
+SCRIPTS_DIR=/opt/midas/scripts
+POSTGRES_DIR=/opt/midas/postgres
 CONFIG_DIR=~/.config/midas
-BIN_DIR=/var/midas/bin
-LIB_DIR=/var/midas/lib
+BIN_DIR=/usr/local/bin
+LIB_DIR=/usr/local/lib
 
 # Create directories if they don't exist
 echo "Creating necessary directories for logs, data, and scripts..."
@@ -38,6 +39,15 @@ fi
 
 touch $LOG_DIR/historical.log
 touch $LOG_DIR/trading.log
+
+# Create postgres docker volume directory
+if [ ! -d "$POSTGRES_DIR" ]; then
+	sudo mkdir -p "$POSTGRES_DIR"
+	sudo chown "$USER":"$USER" "$POSTGRES_DIR"
+	echo "Postgres directory created: $POSTGRES_DIR"
+else
+	echo "Postgres directory already exists: $POSTGRES_DIR"
+fi
 
 # Create data directory
 if [ ! -d "$DATA_DIR" ]; then
@@ -101,10 +111,12 @@ echo "Scripts copied to $SCRIPTS_DIR."
 
 # Set permissions (ensure Docker containers can write to these directories)
 sudo chmod 755 "$LOG_DIR"
+sudo chmod 755 "$POSTGRES_DIR"
 sudo chmod 755 "$DATA_DIR"
 sudo chmod 755 "$RAW_DIR"
 sudo chmod 755 "$PROCESSED_DIR"
 sudo chmod 755 "$SCRIPTS_DIR"
+sudo chmod 755 "$CONFIG_DIR"
 sudo chmod 755 "$BIN_DIR"
 sudo chmod 755 "$LIB_DIR"
 
