@@ -7,6 +7,7 @@ RAW_DIR=/opt/midas/data/raw_data/
 PROCESSED_DIR=/opt/midas/data/processed_data/
 SCRIPTS_DIR=/opt/midas/scripts
 POSTGRES_DIR=/opt/midas/postgres
+POSTGRES_DATA=/opt/midas/postgres/data
 CONFIG_DIR=~/.config/midas
 BIN_DIR=/usr/local/bin
 LIB_DIR=/usr/local/lib
@@ -47,6 +48,14 @@ if [ ! -d "$POSTGRES_DIR" ]; then
 	echo "Postgres directory created: $POSTGRES_DIR"
 else
 	echo "Postgres directory already exists: $POSTGRES_DIR"
+fi
+
+if [ ! -d "$POSTGRES_DATA" ]; then
+	sudo mkdir -p "$POSTGRES_DATA"
+	sudo chown "$USER":"$USER" "$POSTGRES_DATA"
+	echo "Postgres data directory created: $POSTGRES_DATA"
+else
+	echo "Postgres data directory already exists: $POSTGRES_DATA"
 fi
 
 # Create data directory
@@ -112,6 +121,7 @@ echo "Scripts copied to $SCRIPTS_DIR."
 # Set permissions (ensure Docker containers can write to these directories)
 sudo chmod 755 "$LOG_DIR"
 sudo chmod 755 "$POSTGRES_DIR"
+sudo chmod 755 "$POSTGRES_DATA"
 sudo chmod 755 "$DATA_DIR"
 sudo chmod 755 "$RAW_DIR"
 sudo chmod 755 "$PROCESSED_DIR"

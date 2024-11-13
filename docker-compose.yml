@@ -24,6 +24,7 @@ services:
       - ${SCRIPTS_DIR}/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
     networks:
       - app-network
+    restart: always
 
   historical-database:
     build:
@@ -66,6 +67,7 @@ services:
     command: ["./midas-historical"]
     networks:
       - app-network 
+    restart: always
 
   trading-database:
     build:
@@ -109,6 +111,7 @@ services:
     command: ["./midas-trading"]
     networks:
       - app-network
+    restart: always
 
 
   # Admin for updating etc 
