@@ -77,16 +77,21 @@ pub async fn bulk_upload(
     Extension(pool): Extension<PgPool>,
     Json(file_path): Json<String>,
 ) -> impl IntoResponse {
-    const BATCH_SIZE: usize = 20000;
-    let path = PathBuf::from(&file_path);
+    let path;
+    if cfg!(test) {
+        path = PathBuf::from(&file_path);
+    } else {
+        path = PathBuf::from("data/processed_data").join(&file_path);
+    }
 
     if !path.is_file() {
-        error!("Path is not a file: {}", file_path);
+        error!("Path is not a file: {}", &file_path);
         return Err(Error::CustomError("Path is not a file.".to_string()));
     }
 
-    info!("Preparing to stream load file : {}", file_path);
+    info!("Preparing to stream load file : {}", &file_path);
 
+    const BATCH_SIZE: usize = 20000;
     let mut insert_batch = InsertBatch::new();
 
     // Create a stream to send updates
@@ -352,6 +357,7 @@ mod test {
 
     #[sqlx::test]
     #[serial]
+    // #[ignore]
     async fn test_bulk_upload() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();

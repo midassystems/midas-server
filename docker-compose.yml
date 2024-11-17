@@ -114,22 +114,22 @@ services:
     restart: always
 
 
-  # Admin for updating etc 
-  manager:
-    build:
-      context: .
-      dockerfile: "./cli/Dockerfile"
-    environment:
-      MIDAS_URL: http://historical-service:${HISTORICAL_PORT}
-    profiles:
-      - production  
-    volumes:
-      - data:/app/data
-      - ${BIN_DIR}:/usr/local/bin  # Mount host's bin directory
-      - ${LIB_DIR}:/usr/local/lib  # Mount host's lib directory
-    command: ["./app/scripts/build-manager.sh"]
-    networks:
-      - app-network
+  # # Admin for updating etc 
+  # manager:
+  #   build:
+  #     context: .
+  #     dockerfile: "./cli/Dockerfile"
+  #   environment:
+  #     MIDAS_URL: http://historical-service:${HISTORICAL_PORT}
+  #   profiles:
+  #     - production  
+  #   volumes:
+  #     - data:/app/data
+  #     - ${BIN_DIR}:/usr/local/bin  # Mount host's bin directory
+  #     - ${LIB_DIR}:/usr/local/lib  # Mount host's lib directory
+  #   command: ["./app/scripts/build-manager.sh"]
+  #   networks:
+  #     - app-network
 
 networks:
   app-network:
