@@ -11,6 +11,8 @@ deploy.txt
 /lib
 /bin
 /config
+/postgres
+/zextra
 
 sql_commands.txt
 test.sql
