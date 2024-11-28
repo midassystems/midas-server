@@ -149,19 +149,23 @@ impl InstrumentsQueries for Instrument {
         tx: &mut Transaction<'_, Postgres>,
         instrument_id: i32,
     ) -> Result<()> {
-        info!(
-            "Updating instrument with id {} to new values: ticker = {}, name = {}",
-            instrument_id, self.ticker, self.name
-        );
+        info!("Updating instrument with id {}.", instrument_id);
+
         let _ = sqlx::query(
             r#"
             UPDATE instrument
-            SET ticker = $1, name =$2
-            WHERE id = $3
+            SET ticker=$1, name=$2, vendor=$3, stype=$4, dataset=$5, last_available=$6, first_available=$7, active=$8 
+            WHERE id = $9
             "#,
         )
         .bind(&self.ticker)
         .bind(&self.name)
+        .bind(&self.vendor)
+        .bind(&self.stype)
+        .bind(&self.dataset)
+        .bind(self.last_available as i64)
+        .bind(self.first_available as i64)
+        .bind(&self.active)
         .bind(instrument_id)
         .execute(tx)
         .await?;
