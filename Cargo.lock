@@ -1251,7 +1251,7 @@ checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
 [[package]]
 name = "mbn"
 version = "0.1.0"
-source = "git+https://github.com/anthonyb8/mbn.git?branch=main#cd4ee19feddf53a2d2bdac64dde3101d95d1c04f"
+source = "git+https://github.com/anthonyb8/mbn.git?branch=main#9b4141a71b5d4b113bbe3fd123efa3d155f7af5e"
 dependencies = [
  "bigdecimal",
  "chrono",

@@ -19,6 +19,7 @@ pub fn instrument_service() -> Router {
         .route("/create", post(create_instrument))
         .route("/delete", delete(delete_instrument))
         .route("/list", get(list_instruments))
+        .route("/vendor_list", get(vendor_list_instruments))
         .route("/update", put(update_instrument_id))
         .route("/get", get(get_instrument))
 }
@@ -139,6 +140,26 @@ pub async fn list_instruments(
     }
 }
 
+pub async fn vendor_list_instruments(
+    Extension(pool): Extension<PgPool>,
+    Json(vendor): Json<String>,
+) -> Result<ApiResponse<Vec<Instrument>>> {
+    info!("Handling request to list {} instruments", vendor);
+
+    match Instrument::vendor_list_instruments(&pool, &vendor).await {
+        Ok(instruments) => Ok(ApiResponse::new(
+            "success",
+            "Successfully retrieved vendor list of instruments.",
+            StatusCode::OK,
+            Some(instruments),
+        )),
+        Err(e) => {
+            error!("Failed to retrieve instrument list : {:?}", e);
+            Err(e.into())
+        }
+    }
+}
+
 pub async fn update_instrument_id(
     Extension(pool): Extension<PgPool>,
     Json((instrument, id)): Json<(Instrument, i32)>,
@@ -179,6 +200,7 @@ pub async fn update_instrument_id(
 mod test {
     use super::*;
     use crate::database::init::init_db;
+    use mbn::symbols::Vendors;
     use regex::Regex;
     use serial_test::serial;
 
@@ -200,7 +222,17 @@ mod test {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
 
-        let instrument = Instrument::new("AAPL", "Apple Inc.", None);
+        let instrument = Instrument::new(
+            None,
+            "AAPL",
+            "Apple Inc.",
+            Vendors::Databento,
+            Some("continuous".to_string()),
+            Some("GLBX.MDP3".to_string()),
+            1704672000000000000,
+            1704672000000000000,
+            true,
+        );
 
         // Test
         let result = create_instrument(Extension(pool.clone()), Json(instrument))
@@ -226,7 +258,17 @@ mod test {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
 
-        let instrument = Instrument::new("AAPL", "Apple Inc.", None);
+        let instrument = Instrument::new(
+            None,
+            "AAPL",
+            "Apple Inc.",
+            Vendors::Databento,
+            Some("continuous".to_string()),
+            Some("GLBX.MDP3".to_string()),
+            1704672000000000000,
+            1704672000000000000,
+            true,
+        );
 
         let result = create_instrument(Extension(pool.clone()), Json(instrument))
             .await
@@ -277,7 +319,17 @@ mod test {
 
         let ticker = "AAPL";
         let name = "Apple Inc.";
-        let instrument = Instrument::new(ticker, name, None);
+        let instrument = Instrument::new(
+            None,
+            ticker,
+            name,
+            Vendors::Databento,
+            Some("continuous".to_string()),
+            Some("GLBX.MDP3".to_string()),
+            1704672000000000000,
+            1704672000000000000,
+            true,
+        );
         let id = instrument
             .insert_instrument(&mut transaction)
             .await
@@ -286,7 +338,17 @@ mod test {
 
         let ticker = "TSLA";
         let name = "Tesle Inc.";
-        let instrument = Instrument::new(ticker, name, None);
+        let instrument = Instrument::new(
+            None,
+            ticker,
+            name,
+            Vendors::Databento,
+            Some("continuous".to_string()),
+            Some("GLBX.MDP3".to_string()),
+            1704672000000000000,
+            1704672000000000000,
+            true,
+        );
         let id2 = instrument
             .insert_instrument(&mut transaction)
             .await
@@ -318,6 +380,79 @@ mod test {
 
     #[sqlx::test]
     #[serial]
+    async fn test_vendor_list_instruments() {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+        let mut transaction = pool.begin().await.expect("Error settign up database.");
+
+        // Create Instruments
+        let mut ids: Vec<i32> = vec![];
+
+        let ticker = "AAPL";
+        let name = "Apple Inc.";
+        let instrument = Instrument::new(
+            None,
+            ticker,
+            name,
+            Vendors::Databento,
+            Some("continuous".to_string()),
+            Some("GLBX.MDP3".to_string()),
+            1704672000000000000,
+            1704672000000000000,
+            true,
+        );
+        let id = instrument
+            .insert_instrument(&mut transaction)
+            .await
+            .expect("Error inserting symbol.");
+        ids.push(id);
+
+        let ticker = "TSLA";
+        let name = "Tesle Inc.";
+        let instrument = Instrument::new(
+            None,
+            ticker,
+            name,
+            Vendors::Yfinance,
+            Some("continuous".to_string()),
+            Some("GLBX.MDP3".to_string()),
+            1704672000000000000,
+            1704672000000000000,
+            true,
+        );
+        let id2 = instrument
+            .insert_instrument(&mut transaction)
+            .await
+            .expect("Error inserting symbol.");
+        ids.push(id2);
+
+        let _ = transaction.commit().await;
+
+        // Test
+        let result = vendor_list_instruments(Extension(pool.clone()), Json("yfinance".to_string()))
+            .await
+            .unwrap();
+
+        // Validate
+        assert_eq!(result.code, StatusCode::OK);
+        assert!(result.data.unwrap().len() == 1);
+
+        // Clean up
+        let mut transaction = pool
+            .begin()
+            .await
+            .expect("Error setting up test transaction.");
+        for id in ids {
+            Instrument::delete_instrument(&mut transaction, id)
+                .await
+                .expect("Error on delete.");
+        }
+
+        let _ = transaction.commit().await;
+    }
+
+    #[sqlx::test]
+    #[serial]
     async fn test_update_instrument() {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
@@ -326,7 +461,17 @@ mod test {
         // Create Instrument
         let ticker = "AAPL";
         let name = "Apple Inc.";
-        let instrument = Instrument::new(ticker, name, None);
+        let instrument = Instrument::new(
+            None,
+            ticker,
+            name,
+            Vendors::Databento,
+            Some("continuous".to_string()),
+            Some("GLBX.MDP3".to_string()),
+            1704672000000000000,
+            1704672000000000000,
+            true,
+        );
         let id = instrument
             .insert_instrument(&mut transaction)
             .await
@@ -336,7 +481,17 @@ mod test {
         // Test
         let new_ticker = "TSLA";
         let new_name = "Tesla Inc.";
-        let new_instrument = Instrument::new(new_ticker, new_name, None);
+        let new_instrument = Instrument::new(
+            None,
+            new_ticker,
+            new_name,
+            Vendors::Databento,
+            Some("continuous".to_string()),
+            Some("GLBX.MDP3".to_string()),
+            1704672000000000000,
+            1704672000000000000,
+            true,
+        );
 
         let result = update_instrument_id(Extension(pool.clone()), Json((new_instrument, id)))
             .await

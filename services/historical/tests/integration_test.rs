@@ -51,7 +51,16 @@ async fn test_instrument_create() -> Result<()> {
     let app = create_app().await;
 
     // Test
-    let intstrument_json = json!({"ticker": "AAPL11", "name": "Apple tester"});
+    let intstrument_json = json!({
+        "ticker": "AAPL11", 
+        "name": "Apple tester",
+        "vendor":"databento", 
+        "stype": "continuous", 
+        "dataset": "GLBX.MDP3", 
+        "last_available": 1704672000000000000 as i64, 
+        "first_available" : 1704672000000000001 as i64, 
+        "active" : true});
+
     let request = Request::builder()
         .method("POST")
         .uri("/historical/instruments/create")
@@ -88,7 +97,15 @@ async fn test_instrument_get() -> Result<()> {
     let app = create_app().await;
 
     // Create instrument
-    let instrument_json = json!({"ticker": "AAPL11", "name": "Apple tester"});
+    let instrument_json = json!({        
+        "ticker": "AAPL11", 
+        "name": "Apple tester",
+        "vendor":"databento", 
+        "stype": "continuous", 
+        "dataset": "GLBX.MDP3", 
+        "last_available": 1704672000000000000 as i64, 
+        "first_available" : 1704672000000000001 as i64, 
+        "active" : true});
     let request = Request::builder()
         .method("POST")
         .uri("/historical/instruments/create")
@@ -161,7 +178,15 @@ async fn test_instrument_list() -> Result<()> {
 
     // Create first instrument
     let app = create_app().await;
-    let intstrument_json = json!({"ticker": "TSLA5", "name": "Tesla"});
+    let intstrument_json = json!({
+        "ticker": "TSLA5", 
+        "name": "Tesla", 
+        "vendor":"databento", 
+        "stype": "continuous", 
+        "dataset": "GLBX.MDP3", 
+        "last_available": 1704672000000000000 as i64, 
+        "first_available" : 1704672000000000001 as i64, 
+        "active" : true});
     let request = Request::builder()
         .method("POST")
         .uri("/historical/instruments/create")
@@ -177,7 +202,98 @@ async fn test_instrument_list() -> Result<()> {
 
     // Create second instrument
     let app = create_app().await;
-    let intstrument_json = json!({"ticker": "MSFT5", "name": "Microsoft"});
+    let intstrument_json = json!({
+        "ticker": "MSFT5", 
+        "name": "Microsoft", 
+        "vendor":"databento", 
+        "stype": "continuous", 
+        "dataset": "GLBX.MDP3", 
+        "last_available": 1704672000000000000 as i64, 
+        "first_available" : 1704672000000000001 as i64, 
+        "active" : true});
+    let request = Request::builder()
+        .method("POST")
+        .uri("/historical/instruments/create")
+        .header("content-type", "application/json")
+        .body(Body::from(intstrument_json.to_string()))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    let api_response: ApiResponse<i32> = parse_response(response).await.unwrap();
+    let id = api_response.data.unwrap();
+    ids.push(id);
+
+    // Test
+    let app = create_app().await;
+    let request = Request::builder()
+        .method("GET")
+        .uri("/historical/instruments/list")
+        .header("content-type", "application/json")
+        .body(Body::from(intstrument_json.to_string()))
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    let api_response: ApiResponse<Vec<Instrument>> = parse_response(response).await.unwrap();
+
+    // Validate
+    assert!(api_response.data.unwrap().len() > 0);
+    assert_eq!(api_response.code, StatusCode::OK);
+
+    // Cleanup
+    for id in ids {
+        let request = Request::builder()
+            .method("DELETE")
+            .uri("/historical/instruments/delete")
+            .header("content-type", "application/json")
+            .body(Body::from(id.to_string()))
+            .unwrap();
+
+        let pool = init_db().await?;
+        let app = router(pool);
+        let _ = app.oneshot(request).await.unwrap();
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn test_vendor_list_instruments() -> Result<()> {
+    let mut ids: Vec<i32> = Vec::new();
+
+    // Create first instrument
+    let app = create_app().await;
+    let intstrument_json = json!({
+        "ticker": "TSLA5", 
+        "name": "Tesla",
+        "vendor":"databento", 
+        "stype": "continuous", 
+        "dataset": "GLBX.MDP3", 
+        "last_available": 1704672000000000000 as i64, 
+        "first_available" : 1704672000000000001 as i64, 
+        "active" : true});
+    let request = Request::builder()
+        .method("POST")
+        .uri("/historical/instruments/create")
+        .header("content-type", "application/json")
+        .body(Body::from(intstrument_json.to_string()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+
+    let api_response: ApiResponse<i32> = parse_response(response).await.unwrap();
+    let id = api_response.data.unwrap();
+    ids.push(id);
+
+    // Create second instrument
+    let app = create_app().await;
+    let intstrument_json = json!({
+        "ticker": "MSFT5", 
+        "name": "Microsoft",
+        "vendor":"databento", 
+        "stype": "continuous", 
+        "dataset": "GLBX.MDP3", 
+        "last_available": 1704672000000000000 as i64, 
+        "first_available" : 1704672000000000001 as i64, 
+        "active" : true});
     let request = Request::builder()
         .method("POST")
         .uri("/historical/instruments/create")
@@ -228,7 +344,16 @@ async fn test_instrument_update() -> Result<()> {
 
     // Create instrument
     let app = create_app().await;
-    let intstrument_json = json!({"ticker": "TSLA10", "name": "Tesla"});
+    let intstrument_json = json!({
+        "ticker": "TSLA10", 
+        "name": "Tesla",
+        "vendor":"databento", 
+        "stype": "continuous", 
+        "dataset": "GLBX.MDP3", 
+        "last_available": 1704672000000000000 as i64, 
+        "first_available" : 1704672000000000001 as i64, 
+        "active" : true});
+
     let request = Request::builder()
         .method("POST")
         .uri("/historical/instruments/create")
@@ -244,7 +369,16 @@ async fn test_instrument_update() -> Result<()> {
 
     // Test
     let app = create_app().await;
-    let intstrument_json = json!({"ticker": "F2", "name": "Telsa"});
+    let intstrument_json = json!({
+        "ticker": "F2", 
+        "name": "Telsa", 
+        "vendor":"databento", 
+        "stype": "continuous", 
+        "dataset": "GLBX.MDP3", 
+        "last_available": 1704672000000000000 as i64, 
+        "first_available" : 1704672000000000001 as i64, 
+        "active" : true});
+
     let update_payload = json!([intstrument_json, id]);
     let request = Request::builder()
         .method("PUT")
@@ -283,7 +417,16 @@ async fn test_records_create() -> Result<()> {
 
     // Create first instrument
     let app = create_app().await;
-    let intstrument_json = json!({"ticker": "TSLA5", "name": "Tesla"});
+    let intstrument_json = json!({
+        "ticker": "TSLA5", 
+        "name": "Tesla",
+        "vendor":"databento", 
+        "stype": "continuous", 
+        "dataset": "GLBX.MDP3", 
+        "last_available": 1704672000000000000 as i64, 
+        "first_available" : 1704672000000000001 as i64, 
+        "active" : true});
+
     let request = Request::builder()
         .method("POST")
         .uri("/historical/instruments/create")
@@ -386,7 +529,16 @@ async fn test_records_get() -> Result<()> {
 
     // Create first instrument
     let app = create_app().await;
-    let intstrument_json = json!({"ticker": "TSLA", "name": "Tesla"});
+    let intstrument_json = json!({
+        "ticker": "TSLA", 
+        "name": "Tesla",
+        "vendor":"databento", 
+        "stype": "continuous", 
+        "dataset": "GLBX.MDP3", 
+        "last_available": 1704672000000000000 as i64, 
+        "first_available" : 1704672000000000001 as i64, 
+        "active" : true});
+
     let request = Request::builder()
         .method("POST")
         .uri("/historical/instruments/create")
