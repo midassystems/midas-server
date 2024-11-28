@@ -1,3 +1,0 @@
-# This runs the manager script every day at midnight
-0 0 * * * /app/scripts/manager.sh >> /var/log/manager.log 2>&1
-

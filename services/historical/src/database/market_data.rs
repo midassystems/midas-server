@@ -807,6 +807,7 @@ mod test {
     use mbn::enums::{Action, Side};
     use mbn::symbols::Instrument;
     use serial_test::serial;
+    use mbn::symbols::Vendors;
 
     async fn create_instrument(pool: &PgPool) -> Result<i32> {
         let mut transaction = pool
@@ -816,7 +817,17 @@ mod test {
 
         let ticker = "AAPL";
         let name = "Apple Inc.";
-        let instrument = Instrument::new(ticker, name, None);
+        let instrument = Instrument::new(            
+            None,
+            ticker,
+            name,
+            Vendors::Databento,
+            Some("continuous".to_string()),
+            Some("GLBX.MDP3".to_string()),
+            1704672000000000000,
+            1704672000000000000,
+            true
+        );
         let id = instrument
             .insert_instrument(&mut transaction)
             .await

@@ -259,6 +259,7 @@ mod test {
     use hyper::body::HttpBody as _;
     use mbn::encode::RecordEncoder;
     use mbn::record_ref::RecordRef;
+    use mbn::symbols::Vendors;
     use mbn::{
         decode::Decoder,
         enums::Schema,
@@ -278,7 +279,17 @@ mod test {
         // Create instrument
         let ticker = "AAPL";
         let name = "Apple Inc.";
-        let instrument = Instrument::new(ticker, name, None);
+        let instrument = Instrument::new(
+            None,
+            ticker,
+            name,
+            Vendors::Databento,
+            Some("continuous".to_string()),
+            Some("GLBX.MDP3".to_string()),
+            1704672000000000000,
+            1704672000000000000,
+            true,
+        );
         let id: i32 = instrument
             .insert_instrument(&mut transaction)
             .await
@@ -366,7 +377,17 @@ mod test {
         // Create instrument
         let ticker = "AAPL";
         let name = "Apple Inc.";
-        let instrument = Instrument::new(ticker, name, None);
+        let instrument = Instrument::new(
+            None,
+            ticker,
+            name,
+            Vendors::Databento,
+            Some("continuous".to_string()),
+            Some("GLBX.MDP3".to_string()),
+            1704672000000000000,
+            1704672000000000000,
+            true,
+        );
         let id: i32 = instrument
             .insert_instrument(&mut transaction)
             .await
@@ -498,7 +519,17 @@ mod test {
         // Create instrument
         let ticker = "AAPL";
         let name = "Apple Inc.";
-        let instrument = Instrument::new(ticker, name, None);
+        let instrument = Instrument::new(
+            None,
+            ticker,
+            name,
+            Vendors::Databento,
+            Some("continuous".to_string()),
+            Some("GLBX.MDP3".to_string()),
+            1704672000000000000,
+            1704672000000000000,
+            true,
+        );
         let id: i32 = instrument
             .insert_instrument(&mut transaction)
             .await
