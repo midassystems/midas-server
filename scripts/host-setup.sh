@@ -23,7 +23,7 @@ fi
 if [ ! -d "$CONFIG_DIR" ]; then
 	sudo mkdir -p "$CONFIG_DIR"
 	sudo chown "$USER":"$USER" "$CONFIG_DIR"
-	cp tickers_template.json "$CONFIG_DIR/tickers.json"
+	# cp tickers_template.json "$CONFIG_DIR/tickers.json"
 	echo "Config directory set up."
 else
 	echo "Config directory already exists: $CONFIG_DIR"
