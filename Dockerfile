@@ -58,7 +58,7 @@ COPY ./server/.env /server/.env
 COPY ./server/docker-compose.yml /server/docker-compose.yml
 COPY ./server/Cargo.toml /server/Cargo.toml
 COPY ./server/Cargo.lock /server/Cargo.lock
-COPY ./server/tickers_template.json /server/tickers_template.json
+# COPY ./server/tickers_template.json /server/tickers_template.json
 
 
 
