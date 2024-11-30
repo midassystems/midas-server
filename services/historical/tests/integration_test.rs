@@ -5,7 +5,7 @@ use axum::{
     http::{Request, StatusCode},
 };
 use historical::{
-    database::{init::init_db, market_data::RetrieveParams},
+    database::{init::init_db, market_data::read::RetrieveParams},
     response::ApiResponse,
     router::router,
 };
