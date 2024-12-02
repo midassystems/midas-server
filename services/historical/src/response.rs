@@ -5,17 +5,16 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ApiResponse<T> {
     pub status: String,
     pub message: String,
     pub code: u16,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<T>,
+    pub data: T,
 }
 
 impl<T> ApiResponse<T> {
-    pub fn new(status: &str, message: &str, code: StatusCode, data: Option<T>) -> Self {
+    pub fn new(status: &str, message: &str, code: StatusCode, data: T) -> Self {
         Self {
             status: status.to_string(),
             message: message.to_string(),
@@ -35,5 +34,24 @@ impl<T: Serialize> IntoResponse for ApiResponse<T> {
             "data": self.data,
         }));
         (status, body).into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_response() {
+        let status = "success";
+        let msg = "message";
+        let code = StatusCode::OK;
+        let response = ApiResponse::new(status, msg, code, "".to_string());
+
+        // Test
+        assert_eq!(response.status, status);
+        assert_eq!(response.code, 200);
+        assert_eq!(response.message, msg);
+        assert_eq!(response.data, "");
     }
 }

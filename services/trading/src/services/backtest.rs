@@ -7,6 +7,7 @@ use crate::response::ApiResponse;
 use crate::Error;
 use axum::extract::Query;
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::{Extension, Json, Router};
 use mbn::backtest::BacktestData;
@@ -27,7 +28,7 @@ pub fn backtest_service() -> Router {
 pub async fn create_backtest(
     Extension(pool): Extension<PgPool>,
     Json(backtest_data): Json<BacktestData>,
-) -> Result<ApiResponse<i32>> {
+) -> Result<impl IntoResponse> {
     info!("Handling request to create backtest");
 
     let mut transaction = start_transaction(&pool).await?;
@@ -41,7 +42,7 @@ pub async fn create_backtest(
                 "success",
                 &format!("Successfully created backtest with id {}", id),
                 StatusCode::OK,
-                Some(id),
+                id,
             ))
         }
         Err(e) => {
@@ -52,9 +53,7 @@ pub async fn create_backtest(
     }
 }
 
-pub async fn list_backtest(
-    Extension(pool): Extension<PgPool>,
-) -> Result<ApiResponse<Vec<(i32, String)>>> {
+pub async fn list_backtest(Extension(pool): Extension<PgPool>) -> Result<impl IntoResponse> {
     info!("Handling request to list backtests");
 
     match BacktestData::retrieve_list_query(&pool).await {
@@ -64,7 +63,7 @@ pub async fn list_backtest(
                 "success",
                 "Successfully retrieved backtest names.",
                 StatusCode::OK,
-                Some(data),
+                data,
             ))
         }
         Err(e) => {
@@ -77,7 +76,7 @@ pub async fn list_backtest(
 pub async fn retrieve_backtest(
     Extension(pool): Extension<PgPool>,
     Query(params): Query<HashMap<String, String>>,
-) -> Result<ApiResponse<BacktestData>> {
+) -> Result<impl IntoResponse> {
     info!("Handling request to retrieve backtest");
 
     let id: i32 = params
@@ -92,7 +91,7 @@ pub async fn retrieve_backtest(
                 "success",
                 "",
                 StatusCode::OK,
-                Some(backtest),
+                vec![backtest],
             ))
         }
         Err(e) => {
@@ -105,7 +104,7 @@ pub async fn retrieve_backtest(
 pub async fn delete_backtest(
     Extension(pool): Extension<PgPool>,
     Json(id): Json<i32>,
-) -> Result<ApiResponse<()>> {
+) -> Result<impl IntoResponse> {
     info!("Handling request to delete backtest with id {}", id);
 
     let mut transaction = start_transaction(&pool).await?;
@@ -118,7 +117,7 @@ pub async fn delete_backtest(
                 "success",
                 &format!("Successfully deleted backtest with id {}.", id),
                 StatusCode::OK,
-                None,
+                "".to_string(),
             ))
         }
         Err(e) => {
@@ -133,7 +132,9 @@ pub async fn delete_backtest(
 mod test {
     use super::*;
     use crate::database::init::init_db;
+    use hyper::body::to_bytes;
     use regex::Regex;
+    use serde::de::DeserializeOwned;
     use serial_test::serial;
     use std::fs;
 
@@ -147,6 +148,18 @@ mod test {
             }
         }
         None
+    }
+
+    async fn parse_response<T: DeserializeOwned>(
+        response: axum::response::Response,
+    ) -> anyhow::Result<ApiResponse<T>> {
+        // Extract the body as bytes
+        let body_bytes = to_bytes(response.into_body()).await.unwrap();
+        let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
+
+        // Deserialize the response body to ApiResponse for further assertions
+        let api_response: ApiResponse<T> = serde_json::from_str(&body_text).unwrap();
+        Ok(api_response)
     }
 
     #[sqlx::test]
@@ -164,16 +177,21 @@ mod test {
         // Test
         let result = create_backtest(Extension(pool.clone()), Json(backtest_data))
             .await
-            .unwrap();
+            .unwrap()
+            .into_response();
 
         // Validate
-        assert_eq!(result.code, StatusCode::OK);
-        assert!(result
+        let api_result: ApiResponse<i32> = parse_response(result)
+            .await
+            .expect("Error parsing response");
+
+        assert_eq!(api_result.code, StatusCode::OK);
+        assert!(api_result
             .message
             .contains("Successfully created backtest with id"));
 
         // Cleanup
-        let number = get_id_from_string(&result.message);
+        let number = get_id_from_string(&api_result.message);
         if number.is_some() {
             let _ = delete_backtest(Extension(pool.clone()), Json(number.unwrap())).await;
         }
@@ -193,16 +211,28 @@ mod test {
 
         let result = create_backtest(Extension(pool.clone()), Json(backtest_data))
             .await
-            .unwrap();
+            .unwrap()
+            .into_response();
 
-        let number = get_id_from_string(&result.message);
+        let api_result: ApiResponse<i32> = parse_response(result)
+            .await
+            .expect("Error parsing response");
+
+        let number = get_id_from_string(&api_result.message);
         let backtest_id = number.clone();
 
         // Test
-        let backtests = list_backtest(Extension(pool.clone())).await.unwrap();
+        let backtests = list_backtest(Extension(pool.clone()))
+            .await
+            .unwrap()
+            .into_response();
 
         // Validate
-        assert!(backtests.data.unwrap().len() > 0);
+        let api_result: ApiResponse<Vec<(i32, String)>> = parse_response(backtests)
+            .await
+            .expect("Error parsing response");
+
+        assert!(api_result.data.len() > 0);
 
         // Cleanup
         if backtest_id.is_some() {
@@ -224,9 +254,14 @@ mod test {
 
         let result = create_backtest(Extension(pool.clone()), Json(backtest_data_obj.clone()))
             .await
-            .unwrap();
+            .unwrap()
+            .into_response();
 
-        let number = get_id_from_string(&result.message);
+        let api_result: ApiResponse<i32> = parse_response(result)
+            .await
+            .expect("Error parsing response");
+
+        let number = get_id_from_string(&api_result.message);
         let backtest_id = number.clone();
 
         // Test
@@ -236,13 +271,15 @@ mod test {
         // Test
         let backtest_data = retrieve_backtest(Extension(pool.clone()), Query(params))
             .await
-            .unwrap();
+            .unwrap()
+            .into_response();
 
         // Validate
-        assert_eq!(
-            backtest_data.data.unwrap().parameters,
-            backtest_data_obj.parameters
-        );
+        let api_result: ApiResponse<Vec<BacktestData>> = parse_response(backtest_data)
+            .await
+            .expect("Error parsing response");
+
+        assert_eq!(api_result.data[0].parameters, backtest_data_obj.parameters);
 
         // Cleanup
         if backtest_id.is_some() {
@@ -259,9 +296,14 @@ mod test {
         // Test
         let result = delete_backtest(Extension(pool.clone()), Json(63))
             .await
-            .unwrap();
+            .unwrap()
+            .into_response();
 
         // Validate
-        assert_eq!(result.code, StatusCode::OK);
+        let api_result: ApiResponse<String> = parse_response(result)
+            .await
+            .expect("Error parsing response");
+
+        assert_eq!(api_result.code, StatusCode::OK);
     }
 }

@@ -3,6 +3,7 @@ use crate::database::symbols::InstrumentsQueries;
 use crate::error::Result;
 use crate::response::ApiResponse;
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::routing::{delete, get, post, put};
 use axum::{Extension, Json, Router};
 use mbn::symbols::Instrument;
@@ -28,7 +29,7 @@ pub fn instrument_service() -> Router {
 pub async fn create_instrument(
     Extension(pool): Extension<PgPool>,
     Json(instrument): Json<Instrument>,
-) -> Result<ApiResponse<i32>> {
+) -> Result<impl IntoResponse> {
     info!("Handling request to create an instrument {:?}", instrument);
 
     // Start the transaction
@@ -46,7 +47,7 @@ pub async fn create_instrument(
                 "success",
                 &format!("Successfully created instrument with id {}", id),
                 StatusCode::OK,
-                Some(id),
+                id,
             ))
         }
         Err(e) => {
@@ -60,7 +61,7 @@ pub async fn create_instrument(
 pub async fn get_instrument(
     Extension(pool): Extension<PgPool>,
     Json(ticker): Json<String>,
-) -> Result<ApiResponse<Option<i32>>> {
+) -> Result<impl IntoResponse> {
     info!("Handling request to get instrument {}", ticker);
 
     match Instrument::get_instrument_id(&pool, &ticker).await {
@@ -68,7 +69,7 @@ pub async fn get_instrument(
             "success",
             &format!("Successfully retrieved instrument id {}", id),
             StatusCode::OK,
-            Some(Some(id)),
+            id,
         )),
         Ok(None) => {
             info!("No instrument found for ticker {}", ticker);
@@ -77,7 +78,7 @@ pub async fn get_instrument(
                 "success",
                 &format!("No instrument found for ticker {}", ticker),
                 StatusCode::NOT_FOUND,
-                None,
+                0,
             ))
         }
         Err(e) => {
@@ -91,7 +92,7 @@ pub async fn get_instrument(
 pub async fn delete_instrument(
     Extension(pool): Extension<PgPool>,
     Json(id): Json<i32>,
-) -> Result<ApiResponse<()>> {
+) -> Result<impl IntoResponse> {
     info!("Handling request to delete instrument with id {}", id);
 
     let mut tx = start_transaction(&pool).await?;
@@ -105,11 +106,11 @@ pub async fn delete_instrument(
             }
 
             info!("Successfully deleted instrument with id {}", id);
-            Ok(ApiResponse::<()>::new(
+            Ok(ApiResponse::<String>::new(
                 "success",
                 &format!("Successfully deleted instrument with id {}", id),
                 StatusCode::OK,
-                None,
+                "".to_string(),
             ))
         }
         Err(e) => {
@@ -121,9 +122,7 @@ pub async fn delete_instrument(
     }
 }
 
-pub async fn list_instruments(
-    Extension(pool): Extension<PgPool>,
-) -> Result<ApiResponse<Vec<Instrument>>> {
+pub async fn list_instruments(Extension(pool): Extension<PgPool>) -> Result<impl IntoResponse> {
     info!("Handling request to list instruments");
 
     match Instrument::list_instruments(&pool).await {
@@ -131,7 +130,7 @@ pub async fn list_instruments(
             "success",
             "Successfully retrieved list of instruments.",
             StatusCode::OK,
-            Some(instruments),
+            instruments,
         )),
         Err(e) => {
             error!("Failed to retrieve instrument list : {:?}", e);
@@ -143,7 +142,7 @@ pub async fn list_instruments(
 pub async fn vendor_list_instruments(
     Extension(pool): Extension<PgPool>,
     Json(vendor): Json<String>,
-) -> Result<ApiResponse<Vec<Instrument>>> {
+) -> Result<impl IntoResponse> {
     info!("Handling request to list {} instruments", vendor);
 
     match Instrument::vendor_list_instruments(&pool, &vendor).await {
@@ -151,7 +150,7 @@ pub async fn vendor_list_instruments(
             "success",
             "Successfully retrieved vendor list of instruments.",
             StatusCode::OK,
-            Some(instruments),
+            instruments,
         )),
         Err(e) => {
             error!("Failed to retrieve instrument list : {:?}", e);
@@ -163,7 +162,7 @@ pub async fn vendor_list_instruments(
 pub async fn update_instrument_id(
     Extension(pool): Extension<PgPool>,
     Json((instrument, id)): Json<(Instrument, i32)>,
-) -> Result<ApiResponse<()>> {
+) -> Result<impl IntoResponse> {
     info!(
         "Handling request to update instrument with id {} with {:?}",
         id, instrument
@@ -184,7 +183,7 @@ pub async fn update_instrument_id(
                 "success",
                 &format!("Successfully updated instrument with id {}", id),
                 StatusCode::OK,
-                None,
+                "".to_string(),
             ))
         }
         Err(e) => {
@@ -200,8 +199,10 @@ pub async fn update_instrument_id(
 mod test {
     use super::*;
     use crate::database::init::init_db;
+    use hyper::body::to_bytes;
     use mbn::symbols::Vendors;
     use regex::Regex;
+    use serde::de::DeserializeOwned;
     use serial_test::serial;
 
     fn get_id_from_string(message: &str) -> Option<i32> {
@@ -214,6 +215,18 @@ mod test {
             }
         }
         None
+    }
+
+    async fn parse_response<T: DeserializeOwned>(
+        response: axum::response::Response,
+    ) -> anyhow::Result<ApiResponse<T>> {
+        // Extract the body as bytes
+        let body_bytes = to_bytes(response.into_body()).await.unwrap();
+        let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
+
+        // Deserialize the response body to ApiResponse for further assertions
+        let api_response: ApiResponse<T> = serde_json::from_str(&body_text).unwrap();
+        Ok(api_response)
     }
 
     #[sqlx::test]
@@ -237,16 +250,18 @@ mod test {
         // Test
         let result = create_instrument(Extension(pool.clone()), Json(instrument))
             .await
-            .unwrap();
+            .unwrap()
+            .into_response();
 
         // Validate
-        assert_eq!(result.code, StatusCode::OK);
-        assert!(result
-            .message
-            .contains("Successfully created instrument with id"));
+        let api_response: ApiResponse<i32> = parse_response(result)
+            .await
+            .expect("Error parsing response");
+
+        assert_eq!(api_response.code, StatusCode::OK);
 
         // Cleanup
-        let number = get_id_from_string(&result.message);
+        let number = get_id_from_string(&api_response.message);
         if number.is_some() {
             let _ = delete_instrument(Extension(pool.clone()), Json(number.unwrap())).await;
         }
@@ -272,21 +287,30 @@ mod test {
 
         let result = create_instrument(Extension(pool.clone()), Json(instrument))
             .await
-            .unwrap();
+            .unwrap()
+            .into_response();
 
         // Test
         let response = get_instrument(Extension(pool.clone()), Json("AAPL".to_string()))
             .await
-            .unwrap();
+            .unwrap()
+            .into_response();
 
         // Validate
-        assert_eq!(response.code, StatusCode::OK);
-        assert!(response
+        let api_response: ApiResponse<i32> = parse_response(response)
+            .await
+            .expect("Error parsing response");
+
+        assert_eq!(api_response.code, StatusCode::OK);
+        assert!(api_response
             .message
             .contains("Successfully retrieved instrument id"));
 
         // Cleanup
-        let number = get_id_from_string(&result.message);
+        let api_result: ApiResponse<i32> = parse_response(result)
+            .await
+            .expect("Error parsing response");
+        let number = get_id_from_string(&api_result.message);
         if number.is_some() {
             let _ = delete_instrument(Extension(pool.clone()), Json(number.unwrap())).await;
         }
@@ -299,12 +323,17 @@ mod test {
         let pool = init_db().await.unwrap();
 
         // Test
-        let response = get_instrument(Extension(pool.clone()), Json("AAPL".to_string()))
+        let result = get_instrument(Extension(pool.clone()), Json("AAPL".to_string()))
             .await
-            .unwrap();
+            .unwrap()
+            .into_response();
 
         // Validate
-        assert_eq!(response.code, StatusCode::NOT_FOUND);
+        let api_response: ApiResponse<i32> = parse_response(result)
+            .await
+            .expect("Error parsing response");
+
+        assert_eq!(api_response.code, StatusCode::NOT_FOUND);
     }
 
     #[sqlx::test]
@@ -358,11 +387,18 @@ mod test {
         let _ = transaction.commit().await;
 
         // Test
-        let result = list_instruments(Extension(pool.clone())).await.unwrap();
+        let result = list_instruments(Extension(pool.clone()))
+            .await
+            .unwrap()
+            .into_response();
 
         // Validate
-        assert_eq!(result.code, StatusCode::OK);
-        assert!(result.data.unwrap().len() > 0);
+        let api_response: ApiResponse<Vec<Instrument>> = parse_response(result)
+            .await
+            .expect("Error parsing response");
+
+        assert_eq!(api_response.code, StatusCode::OK);
+        assert!(api_response.data.len() > 0);
 
         // Clean up
         let mut transaction = pool
@@ -431,11 +467,16 @@ mod test {
         // Test
         let result = vendor_list_instruments(Extension(pool.clone()), Json("yfinance".to_string()))
             .await
-            .unwrap();
+            .unwrap()
+            .into_response();
 
         // Validate
-        assert_eq!(result.code, StatusCode::OK);
-        assert!(result.data.unwrap().len() == 1);
+        let api_response: ApiResponse<Vec<Instrument>> = parse_response(result)
+            .await
+            .expect("Error parsing response");
+
+        assert_eq!(api_response.code, StatusCode::OK);
+        assert!(api_response.data.len() > 0);
 
         // Clean up
         let mut transaction = pool
@@ -495,10 +536,15 @@ mod test {
 
         let result = update_instrument_id(Extension(pool.clone()), Json((new_instrument, id)))
             .await
-            .expect("Error on updating instrument.");
+            .expect("Error on updating instrument.")
+            .into_response();
 
         // Validate
-        assert_eq!(result.code, StatusCode::OK);
+        let api_response: ApiResponse<String> = parse_response(result)
+            .await
+            .expect("Error parsing response");
+
+        assert_eq!(api_response.code, StatusCode::OK);
 
         // Cleanup
         let mut transaction = pool

@@ -3,22 +3,18 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use derive_more::From;
-use sqlx::Error as SqlxError;
-use std::env::VarError;
 use thiserror::Error;
-use tracing::subscriber::SetGlobalDefaultError;
 
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("Database error: {0}")]
-    SqlError(String),
+    SqlError(#[from] sqlx::Error),
     #[error("Request error: {0}")]
-    TracingError(#[from] SetGlobalDefaultError),
+    TracingError(#[from] tracing::subscriber::SetGlobalDefaultError),
     #[error("Io error: {0}")]
     IoError(#[from] std::io::Error),
     #[error("Io error: {0}")]
-    EnvVarError(#[from] VarError),
+    EnvVarError(#[from] std::env::VarError),
     #[error("General error: {0}")]
     GeneralError(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
     #[error("MBN error: {0}")]
@@ -27,26 +23,10 @@ pub enum Error {
     CustomError(String),
 }
 
-impl From<SqlxError> for Error {
-    fn from(error: SqlxError) -> Self {
-        if let Some(pg_error) = error.as_database_error() {
-            return Error::SqlError(pg_error.message().to_string());
-        } else {
-            Error::SqlError("Database error.".to_string())
-        }
-    }
-}
-
-impl IntoResponse for Error {
-    fn into_response(self) -> Response {
+impl Into<ApiResponse<String>> for Error {
+    fn into(self) -> ApiResponse<String> {
         let (status, message) = match self {
-            Error::SqlError(ref msg) if msg.contains("Duplicate entry error") => {
-                (StatusCode::CONFLICT, msg.clone())
-            }
-            Error::SqlError(ref msg) if msg.contains("Not null violation") => {
-                (StatusCode::BAD_REQUEST, msg.clone())
-            }
-            Error::SqlError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
+            Error::SqlError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
             Error::TracingError(ref msg) => (StatusCode::BAD_REQUEST, msg.to_string()),
             Error::IoError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
             Error::EnvVarError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
@@ -59,10 +39,38 @@ impl IntoResponse for Error {
             status: "failed".to_string(),
             message,
             code: status.as_u16(),
-            data: None::<()>,
+            data: "".to_string(),
         }
-        .into_response()
     }
 }
 
+impl IntoResponse for Error {
+    fn into_response(self) -> Response {
+        let response: ApiResponse<String> = self.into();
+        response.into_response()
+    }
+}
+
+#[macro_export]
+macro_rules! error {
+    ($variant:ident, $($arg:tt)*) => {
+        Error::$variant(format!($($arg)*))
+    };
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
+// pub type ResponseREsult = std /:
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_macro() {
+        let error = error!(CustomError, "Testing 123 : {}", 69);
+        let x_error = Error::CustomError(format!("Testing 123 : {}", 69));
+
+        // Test
+        assert_eq!(error.to_string(), x_error.to_string());
+    }
+}

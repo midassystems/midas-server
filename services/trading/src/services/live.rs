@@ -5,6 +5,7 @@ use crate::response::ApiResponse;
 use crate::Error;
 use axum::extract::Query;
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::{Extension, Json, Router};
 use mbn::live::LiveData;
@@ -25,7 +26,7 @@ pub fn live_service() -> Router {
 pub async fn create_live(
     Extension(pool): Extension<PgPool>,
     Json(live_data): Json<LiveData>,
-) -> Result<ApiResponse<i32>> {
+) -> Result<impl IntoResponse> {
     info!("Handling request to create live");
 
     let mut transaction = start_transaction(&pool).await?;
@@ -39,7 +40,7 @@ pub async fn create_live(
                 "success",
                 &format!("Successfully created live with id {}", id),
                 StatusCode::OK,
-                Some(id),
+                id,
             ))
         }
         Err(e) => {
@@ -50,9 +51,7 @@ pub async fn create_live(
     }
 }
 
-pub async fn list_live(
-    Extension(pool): Extension<PgPool>,
-) -> Result<ApiResponse<Vec<(i32, String)>>> {
+pub async fn list_live(Extension(pool): Extension<PgPool>) -> Result<impl IntoResponse> {
     info!("Handling request to list lives");
 
     match LiveData::retrieve_list_query(&pool).await {
@@ -62,7 +61,7 @@ pub async fn list_live(
                 "success",
                 "Successfully retrieved live names.",
                 StatusCode::OK,
-                Some(data),
+                data,
             ))
         }
         Err(e) => {
@@ -75,7 +74,7 @@ pub async fn list_live(
 pub async fn retrieve_live(
     Extension(pool): Extension<PgPool>,
     Query(params): Query<HashMap<String, String>>,
-) -> Result<ApiResponse<LiveData>> {
+) -> Result<impl IntoResponse> {
     info!("Handling request to retrieve live");
 
     let id: i32 = params
@@ -86,7 +85,7 @@ pub async fn retrieve_live(
     match retrieve_live_related(&pool, id).await {
         Ok(live) => {
             info!("Successfully retrieved live with id {}", id);
-            Ok(ApiResponse::new("success", "", StatusCode::OK, Some(live)))
+            Ok(ApiResponse::new("success", "", StatusCode::OK, vec![live]))
         }
         Err(e) => {
             error!("Failed to retrieve live with id {}: {:?}", id, e);
@@ -98,7 +97,7 @@ pub async fn retrieve_live(
 pub async fn delete_live(
     Extension(pool): Extension<PgPool>,
     Json(id): Json<i32>,
-) -> Result<ApiResponse<()>> {
+) -> Result<impl IntoResponse> {
     info!("Handling request to delete live with id {}", id);
 
     let mut transaction = start_transaction(&pool).await?;
@@ -111,7 +110,7 @@ pub async fn delete_live(
                 "success",
                 &format!("Successfully deleted live with id {}.", id),
                 StatusCode::OK,
-                None,
+                "".to_string(),
             ))
         }
         Err(e) => {
@@ -126,7 +125,9 @@ pub async fn delete_live(
 mod test {
     use super::*;
     use crate::database::init::init_db;
+    use hyper::body::to_bytes;
     use regex::Regex;
+    use serde::de::DeserializeOwned;
     use serial_test::serial;
     use std::fs;
 
@@ -142,6 +143,18 @@ mod test {
         None
     }
 
+    async fn parse_response<T: DeserializeOwned>(
+        response: axum::response::Response,
+    ) -> anyhow::Result<ApiResponse<T>> {
+        // Extract the body as bytes
+        let body_bytes = to_bytes(response.into_body()).await.unwrap();
+        let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
+
+        // Deserialize the response body to ApiResponse for further assertions
+        let api_response: ApiResponse<T> = serde_json::from_str(&body_text).unwrap();
+        Ok(api_response)
+    }
+
     #[sqlx::test]
     #[serial]
     async fn test_create_live() {
@@ -155,16 +168,23 @@ mod test {
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
         // Test
-        let result = create_live(Extension(pool.clone()), Json(live_data))
+        let response = create_live(Extension(pool.clone()), Json(live_data))
             .await
-            .unwrap();
+            .unwrap()
+            .into_response();
 
         // Validate
-        assert_eq!(result.code, StatusCode::OK);
-        assert!(result.message.contains("Successfully created live with id"));
+        let api_response: ApiResponse<i32> = parse_response(response)
+            .await
+            .expect("Error parsing response");
+
+        assert_eq!(api_response.code, StatusCode::OK);
+        assert!(api_response
+            .message
+            .contains("Successfully created live with id"));
 
         // Cleanup
-        let number = get_id_from_string(&result.message);
+        let number = get_id_from_string(&api_response.message);
         if number.is_some() {
             let _ = delete_live(Extension(pool.clone()), Json(number.unwrap())).await;
         }
@@ -184,16 +204,28 @@ mod test {
 
         let result = create_live(Extension(pool.clone()), Json(live_data))
             .await
-            .unwrap();
+            .unwrap()
+            .into_response();
 
-        let number = get_id_from_string(&result.message);
+        let api_result: ApiResponse<i32> = parse_response(result)
+            .await
+            .expect("Error parsing response");
+
+        let number = get_id_from_string(&api_result.message);
         let live_id = number.clone();
 
         // Test
-        let lives = list_live(Extension(pool.clone())).await.unwrap();
+        let response = list_live(Extension(pool.clone()))
+            .await
+            .unwrap()
+            .into_response();
 
         // Validate
-        assert!(lives.data.unwrap().len() > 0);
+        let api_response: ApiResponse<Vec<(i32, String)>> = parse_response(response)
+            .await
+            .expect("Error parsing response");
+
+        assert!(api_response.data.len() > 0);
 
         // Cleanup
         if live_id.is_some() {
@@ -215,9 +247,14 @@ mod test {
 
         let result = create_live(Extension(pool.clone()), Json(live_data_obj.clone()))
             .await
-            .unwrap();
+            .unwrap()
+            .into_response();
 
-        let number = get_id_from_string(&result.message);
+        let api_result: ApiResponse<i32> = parse_response(result)
+            .await
+            .expect("Error parsing response");
+
+        let number = get_id_from_string(&api_result.message);
         let live_id = number.clone();
 
         // Test
@@ -225,12 +262,17 @@ mod test {
         params.insert("id".to_string(), number.unwrap().to_string());
 
         // Test
-        let live_data = retrieve_live(Extension(pool.clone()), Query(params))
+        let response = retrieve_live(Extension(pool.clone()), Query(params))
             .await
-            .unwrap();
+            .unwrap()
+            .into_response();
 
         // Validate
-        assert_eq!(live_data.data.unwrap().parameters, live_data_obj.parameters);
+        let api_response: ApiResponse<Vec<LiveData>> = parse_response(response)
+            .await
+            .expect("Error parsing response");
+
+        assert_eq!(api_response.data[0].parameters, live_data_obj.parameters);
 
         // Cleanup
         if live_id.is_some() {
@@ -247,9 +289,14 @@ mod test {
         // Test
         let result = delete_live(Extension(pool.clone()), Json(63))
             .await
-            .unwrap();
+            .unwrap()
+            .into_response();
 
         // Validate
-        assert_eq!(result.code, StatusCode::OK);
+        let api_result: ApiResponse<String> = parse_response(result)
+            .await
+            .expect("Error parsing response");
+
+        assert_eq!(api_result.code, StatusCode::OK);
     }
 }

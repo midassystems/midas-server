@@ -56,7 +56,7 @@ async fn test_backtest_create() -> Result<()> {
 
     // Validate
     let api_response: ApiResponse<i32> = parse_response(response).await.unwrap();
-    let id = api_response.data.unwrap();
+    let id = api_response.data;
     assert!(id > 0);
     assert_eq!(api_response.code, StatusCode::OK);
 
@@ -93,7 +93,7 @@ async fn test_backtest_get() -> Result<()> {
 
     let response = app.oneshot(request).await.unwrap();
     let api_response: ApiResponse<i32> = parse_response(response).await.unwrap();
-    let id = api_response.data.unwrap();
+    let id = api_response.data;
 
     // Test
     let request = Request::builder()
@@ -105,7 +105,7 @@ async fn test_backtest_get() -> Result<()> {
 
     let app = create_app().await;
     let response = app.oneshot(request).await.unwrap();
-    let api_response: ApiResponse<BacktestData> = parse_response(response).await.unwrap();
+    let api_response: ApiResponse<Vec<BacktestData>> = parse_response(response).await.unwrap();
 
     // Validate
     assert_eq!(api_response.code, StatusCode::OK);
