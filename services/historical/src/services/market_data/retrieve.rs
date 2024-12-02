@@ -121,10 +121,12 @@ mod test {
     use crate::database::init::init_db;
     use crate::database::market_data::read::RetrieveParams;
     use crate::database::symbols::InstrumentsQueries;
+    use crate::response::ApiResponse;
     use crate::services::market_data::load::create_record;
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
     use axum::{Extension, Json};
+    use hyper::body::to_bytes;
     use hyper::body::HttpBody as _;
     use mbn::encode::RecordEncoder;
     use mbn::record_ref::RecordRef;
@@ -135,8 +137,21 @@ mod test {
         records::{BidAskPair, Mbp1Msg, RecordHeader},
         symbols::Instrument,
     };
+    use serde::de::DeserializeOwned;
     use serial_test::serial;
     use std::io::Cursor;
+
+    async fn parse_response<T: DeserializeOwned>(
+        response: axum::response::Response,
+    ) -> anyhow::Result<ApiResponse<T>> {
+        // Extract the body as bytes
+        let body_bytes = to_bytes(response.into_body()).await.unwrap();
+        let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
+
+        // Deserialize the response body to ApiResponse for further assertions
+        let api_response: ApiResponse<T> = serde_json::from_str(&body_text).unwrap();
+        Ok(api_response)
+    }
 
     #[sqlx::test]
     #[serial]
@@ -217,11 +232,15 @@ mod test {
             .encode_records(&[record_ref1, record_ref2])
             .expect("Encoding failed");
 
-        let result = create_record(Extension(pool.clone()), Json(buffer))
+        let response = create_record(Extension(pool.clone()), Json(buffer))
             .await
-            .expect("Error creating records.");
+            .expect("Error creating records.")
+            .into_response();
 
-        assert_eq!(result.code, StatusCode::OK);
+        let api_response: ApiResponse<String> = parse_response(response)
+            .await
+            .expect("Error parsing response");
+        assert_eq!(api_response.code, StatusCode::OK);
 
         // Test
         let params = RetrieveParams {

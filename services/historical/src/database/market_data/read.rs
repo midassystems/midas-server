@@ -580,7 +580,6 @@ mod test {
     use serial_test::serial;
     use mbn::symbols::Vendors;
     use crate::database::market_data::create::RecordInsertQueries;
-    // use sha2::{Digest, Sha256};
     use sqlx::{PgPool, Postgres, Transaction};
     use crate::database::market_data::create::merge_staging;
 

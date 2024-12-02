@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use mbn::records::{BidAskPair, Mbp1Msg};
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Transaction};
+use tracing::info;
 
 // Function to compute a unique hash for the order book state
 fn compute_order_book_hash(levels: &[BidAskPair]) -> String {
@@ -287,12 +288,17 @@ pub async fn merge_staging(tx: &mut Transaction<'_, Postgres>) -> Result<()> {
         .await?;
     }
 
-    // Step 3: Cleanup staging tables after successful merge
-    sqlx::query("DELETE FROM staging_bid_ask").execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM staging_mbp").execute(&mut *tx).await?;
-
+    clear_staging(tx).await?;
 
     Ok(())
+}
+
+pub async fn clear_staging(tx: &mut Transaction<'_, Postgres>) -> Result<()> {
+    sqlx::query("DELETE FROM staging_bid_ask").execute(&mut *tx).await?;
+    sqlx::query("DELETE FROM staging_mbp").execute(&mut *tx).await?;
+    info!("Successfully cleared staging tables.");
+    Ok(())
+
 }
 
 
