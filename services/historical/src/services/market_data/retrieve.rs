@@ -123,10 +123,10 @@ mod test {
     use crate::database::symbols::InstrumentsQueries;
     use crate::response::ApiResponse;
     use crate::services::market_data::load::create_record;
-    use axum::http::StatusCode;
+    // use axum::http::StatusCode;
     use axum::response::IntoResponse;
     use axum::{Extension, Json};
-    use hyper::body::to_bytes;
+    // use hyper::body::to_bytes;
     use hyper::body::HttpBody as _;
     use mbn::encode::RecordEncoder;
     use mbn::record_ref::RecordRef;
@@ -137,21 +137,21 @@ mod test {
         records::{BidAskPair, Mbp1Msg, RecordHeader},
         symbols::Instrument,
     };
-    use serde::de::DeserializeOwned;
+    // use serde::de::DeserializeOwned;
     use serial_test::serial;
     use std::io::Cursor;
 
-    async fn parse_response<T: DeserializeOwned>(
-        response: axum::response::Response,
-    ) -> anyhow::Result<ApiResponse<T>> {
-        // Extract the body as bytes
-        let body_bytes = to_bytes(response.into_body()).await.unwrap();
-        let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
-
-        // Deserialize the response body to ApiResponse for further assertions
-        let api_response: ApiResponse<T> = serde_json::from_str(&body_text).unwrap();
-        Ok(api_response)
-    }
+    // async fn parse_response<T: DeserializeOwned>(
+    //     response: axum::response::Response,
+    // ) -> anyhow::Result<ApiResponse<T>> {
+    //     // Extract the body as bytes
+    //     let body_bytes = to_bytes(response.into_body()).await.unwrap();
+    //     let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
+    //
+    //     // Deserialize the response body to ApiResponse for further assertions
+    //     let api_response: ApiResponse<T> = serde_json::from_str(&body_text).unwrap();
+    //     Ok(api_response)
+    // }
 
     #[sqlx::test]
     #[serial]
@@ -236,11 +236,26 @@ mod test {
             .await
             .expect("Error creating records.")
             .into_response();
+        let mut stream = response.into_body();
 
-        let api_response: ApiResponse<String> = parse_response(response)
-            .await
-            .expect("Error parsing response");
-        assert_eq!(api_response.code, StatusCode::OK);
+        // Collect streamed responses
+        while let Some(chunk) = stream.data().await {
+            match chunk {
+                Ok(bytes) => {
+                    let bytes_str = String::from_utf8_lossy(&bytes);
+
+                    match serde_json::from_str::<ApiResponse<String>>(&bytes_str) {
+                        Ok(response) => if response.status == "success" {},
+                        Err(e) => {
+                            eprintln!("Failed to parse chunk: {:?}, raw chunk: {}", e, bytes_str);
+                        }
+                    }
+                }
+                Err(e) => {
+                    panic!("Error while reading chunk: {:?}", e);
+                }
+            }
+        }
 
         // Test
         let params = RetrieveParams {

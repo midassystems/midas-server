@@ -10,6 +10,7 @@ use historical::{
     router::router,
 };
 use hyper::body::to_bytes;
+use hyper::body::HttpBody as _;
 use mbn::enums::Schema;
 use mbn::{
     encode::RecordEncoder,
@@ -507,9 +508,26 @@ async fn test_records_create() -> Result<()> {
     let response = app.oneshot(request).await?;
 
     // Validate
-    let api_response: ApiResponse<String> = parse_response(response).await.unwrap();
+    // Stream and parse the response body
+    let mut body_stream = response.into_body();
 
-    assert_eq!(api_response.code, StatusCode::OK);
+    // Collect the response body as bytes
+    let mut responses = Vec::new();
+    while let Some(chunk) = body_stream.data().await {
+        match chunk {
+            Ok(bytes) => {
+                let bytes_str = String::from_utf8_lossy(&bytes);
+                let api_response: ApiResponse<String> =
+                    serde_json::from_str::<ApiResponse<String>>(&bytes_str)?;
+                responses.push(api_response);
+            }
+            Err(e) => {
+                panic!("Error while reading stream: {:?}", e);
+            }
+        }
+    }
+
+    assert_eq!(responses[responses.len() - 1].code, StatusCode::OK);
 
     // Cleanup
     let request = Request::builder()
@@ -614,7 +632,26 @@ async fn test_records_get() -> Result<()> {
         .unwrap();
 
     let app = create_app().await;
-    let _ = app.oneshot(request).await.unwrap();
+    let response = app.oneshot(request).await.unwrap();
+
+    // Stream and parse the response body
+    let mut body_stream = response.into_body();
+
+    // Collect the response body as bytes
+    let mut responses = Vec::new();
+    while let Some(chunk) = body_stream.data().await {
+        match chunk {
+            Ok(bytes) => {
+                let bytes_str = String::from_utf8_lossy(&bytes);
+                let api_response: ApiResponse<String> =
+                    serde_json::from_str::<ApiResponse<String>>(&bytes_str)?;
+                responses.push(api_response);
+            }
+            Err(e) => {
+                panic!("Error while reading stream: {:?}", e);
+            }
+        }
+    }
 
     // Test
     let params = RetrieveParams {

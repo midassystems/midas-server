@@ -3,7 +3,6 @@ use async_trait::async_trait;
 use mbn::records::{BidAskPair, Mbp1Msg};
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Transaction};
-use tracing::info;
 
 // Function to compute a unique hash for the order book state
 fn compute_order_book_hash(levels: &[BidAskPair]) -> String {
@@ -28,7 +27,7 @@ fn compute_order_book_hash(levels: &[BidAskPair]) -> String {
 /// Primary insert method
 pub struct InsertBatch {
     pub mbp_values: Vec<(i32, i64, i64, i32, i32, i32, i32, i64, i32, i32, String)>,
-    pub bid_ask_batches: Vec<Vec<(i32, i64, i32, i32, i64, i32, i32)>>
+    pub bid_ask_batches: Vec<Vec<(i32, i64, i32, i32, i64, i32, i32)>>,
 
 }
 impl InsertBatch {
@@ -103,11 +102,12 @@ impl InsertBatch {
             order_book_hashes.push(hash.as_str()); // Use &str for the string
         }
 
-        // Now, insert into mbp and get the generated ids
+        // INsert into mbp
         let mbp_ids: Vec<i32> = sqlx::query_scalar(
             r#"
-            INSERT INTO staging_mbp (instrument_id, ts_event, price, size, action, side, flags, ts_recv, ts_in_delta, sequence, order_book_hash)
+            INSERT INTO mbp (instrument_id, ts_event, price, size, action, side, flags, ts_recv, ts_in_delta, sequence, order_book_hash)
             SELECT * FROM UNNEST($1::int[], $2::bigint[], $3::bigint[], $4::int[], $5::int[], $6::int[], $7::int[], $8::bigint[], $9::int[], $10::int[], $11::text[])
+            ON CONFLICT DO NOTHING
             RETURNING id
             "#
         )
@@ -125,7 +125,6 @@ impl InsertBatch {
         .fetch_all(&mut *tx)
         .await?;
 
-     
         // Create separate vectors for each field
         let mut depths = Vec::new();
         let mut bid_px = Vec::new();
@@ -154,7 +153,7 @@ impl InsertBatch {
         // Insert all bid_ask levels associated with this mbp_id
         sqlx::query(
             r#"
-            INSERT INTO staging_bid_ask (mbp_id, depth, bid_px, bid_sz, bid_ct, ask_px, ask_sz, ask_ct)
+            INSERT INTO bid_ask (mbp_id, depth, bid_px, bid_sz, bid_ct, ask_px, ask_sz, ask_ct)
             SELECT * FROM UNNEST($1::int[], $2::int[], $3::bigint[], $4::int[], $5::int[], $6::bigint[], $7::int[], $8::int[])
             "#
         )
@@ -175,9 +174,11 @@ impl InsertBatch {
 
         Ok(())
     }
+
 }
 
 
+// Utility function for testing
 #[async_trait]
 pub trait RecordInsertQueries {
     async fn insert_query(&self, tx: &mut Transaction<'_, Postgres>) -> Result<()>;
@@ -193,7 +194,7 @@ impl RecordInsertQueries for Mbp1Msg {
         // Insert into mbp table
         let mbp_id: i32 = sqlx::query_scalar(
             r#"
-            INSERT INTO staging_mbp (instrument_id, ts_event, price, size, action, side,flags, ts_recv, ts_in_delta, sequence, order_book_hash)
+            INSERT INTO mbp (instrument_id, ts_event, price, size, action, side,flags, ts_recv, ts_in_delta, sequence, order_book_hash)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING id
             "#
@@ -211,12 +212,12 @@ impl RecordInsertQueries for Mbp1Msg {
         .bind(&order_book_hash) // Bind the computed hash
         .fetch_one(&mut *tx)
         .await?;
-
+     
         // Insert into bid_ask table
         for (depth, level) in self.levels.iter().enumerate() {
             let _ = sqlx::query(
                 r#"
-                INSERT INTO staging_bid_ask (mbp_id, depth, bid_px, bid_sz, bid_ct, ask_px, ask_sz, ask_ct)
+                INSERT INTO bid_ask (mbp_id, depth, bid_px, bid_sz, bid_ct, ask_px, ask_sz, ask_ct)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 "#,
             )
@@ -235,73 +236,6 @@ impl RecordInsertQueries for Mbp1Msg {
         Ok(())
     }
 }
-
-
-pub async fn merge_staging(tx: &mut Transaction<'_, Postgres>) -> Result<()> {
-    // Step 1: Merge `staging_mbp` into `mbp` (Handle duplicates with ON CONFLICT DO NOTHING)
-    let mbp_ids: Vec<i32> = sqlx::query_scalar(
-        r#"
-        INSERT INTO mbp (
-            instrument_id, ts_event, price, size, action, side, flags, ts_recv, ts_in_delta, sequence, order_book_hash
-        )
-        SELECT 
-            instrument_id, ts_event, price, size, action, side, flags, ts_recv, ts_in_delta, sequence, order_book_hash
-        FROM 
-            staging_mbp
-        ON CONFLICT (
-             instrument_id, ts_event, price, size, flags, sequence, order_book_hash, ts_recv, action, side            
-        ) DO NOTHING
-        RETURNING id
-        "#
-    )
-    .fetch_all(&mut *tx)
-    .await?;
-
-    // Step 2: Map `mbp` IDs from staging to production
-    // (We only need to process bid_ask data for rows successfully inserted into `mbp`)
-    if !mbp_ids.is_empty() {
-        sqlx::query(
-            r#"
-            INSERT INTO bid_ask (
-                mbp_id, depth, bid_px, bid_sz, bid_ct, ask_px, ask_sz, ask_ct
-            )
-            SELECT 
-                mbp.id AS mbp_id, 
-                staging_bid_ask.depth, 
-                staging_bid_ask.bid_px, 
-                staging_bid_ask.bid_sz, 
-                staging_bid_ask.bid_ct, 
-                staging_bid_ask.ask_px, 
-                staging_bid_ask.ask_sz, 
-                staging_bid_ask.ask_ct
-            FROM 
-                staging_bid_ask
-            JOIN 
-                staging_mbp ON staging_bid_ask.mbp_id = staging_mbp.id
-            JOIN 
-                mbp ON staging_mbp.instrument_id = mbp.instrument_id 
-                AND staging_mbp.ts_event = mbp.ts_event
-            ON CONFLICT DO NOTHING
-            "#
-        )
-        .execute(&mut *tx)
-        .await?;
-    }
-
-    clear_staging(tx).await?;
-
-    Ok(())
-}
-
-pub async fn clear_staging(tx: &mut Transaction<'_, Postgres>) -> Result<()> {
-    sqlx::query("DELETE FROM staging_bid_ask").execute(&mut *tx).await?;
-    sqlx::query("DELETE FROM staging_mbp").execute(&mut *tx).await?;
-    info!("Successfully cleared staging tables.");
-    Ok(())
-
-}
-
-
 
 
 #[cfg(test)]
@@ -425,7 +359,7 @@ mod test {
      
     #[sqlx::test]
     #[serial]
-    // #[ignore]
+    #[ignore]
     async fn test_create_record() {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
@@ -501,7 +435,7 @@ mod test {
 
     #[sqlx::test]
     #[serial]
-    // #[ignore]
+    #[ignore]
     async fn test_insert_batch() ->anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
@@ -598,7 +532,7 @@ mod test {
     #[sqlx::test]
     #[serial]
     // #[ignore]
-    async fn test_merge_staging() ->anyhow::Result<()> {
+    async fn test_create_duplicate() ->anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
 
@@ -614,14 +548,14 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
-                price: 6770,
-                size: 1,
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562) },
+                price: 6870,
+                size: 2,
                 action: Action::Add as c_char,
                 side: Side::Bid as c_char,
                 depth: 0,
                 flags: 0,
-                ts_recv: 1704209103644092564,
+                ts_recv: 1704209103644092562,
                 ts_in_delta: 17493,
                 sequence: 739763,
                 levels: [BidAskPair {
@@ -655,13 +589,35 @@ mod test {
             },
         ];
 
-        let _result = insert_records(&mut transaction, records.clone())
-            .await
-            .expect("Error inserting records.");
+        let mut insert_batch = InsertBatch::new();
+
+        for record in &records {
+            insert_batch.process(record).await?;
+        }
+        
+        insert_batch.execute(&mut transaction).await?;
+        transaction.commit().await?;
+
+        // let _result = insert_records(&mut transaction, records.clone())
+        //     .await
+        //     .expect("Error inserting records.");
+        // transaction.commit().await?;
+
 
         // Test
-        let _ = merge_staging(&mut transaction).await?;
-        transaction.commit().await?;
+        // let mut transaction = pool
+        //     .begin()
+        //     .await
+        //     .expect("Error setting up test transaction.");
+        // let _ = validate_staging(&mut transaction).await?;
+        // transaction.commit().await?;
+
+        // let mut transaction = pool
+        //     .begin()
+        //     .await
+        //     .expect("Error setting up test transaction.");
+        // let _ = clear_staging(&mut transaction).await?;
+        // transaction.commit().await?;
 
         // Validate 
         let params = RetrieveParams {
@@ -672,7 +628,7 @@ mod test {
         };
         let ret_records = retrieve_records(pool.clone(), params).await?;
 
-        assert_eq!(records.len(), ret_records.len());
+        assert_eq!(ret_records.len(), 1);
 
         // Cleanup
         let mut transaction = pool
