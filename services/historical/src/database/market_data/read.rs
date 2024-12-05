@@ -581,7 +581,7 @@ mod test {
     use mbn::symbols::Vendors;
     use crate::database::market_data::create::RecordInsertQueries;
     use sqlx::{PgPool, Postgres, Transaction};
-    use crate::database::market_data::create::merge_staging;
+    // use crate::database::market_data::create::validate_staging;
 
     async fn create_instrument(pool: &PgPool) -> Result<i32> {
         let mut transaction = pool
@@ -618,7 +618,7 @@ mod test {
             record.insert_query(tx).await?;
         }
         
-        let _ = merge_staging(tx).await?;
+        // let _ = validate_staging(tx).await?;
         // tx.commit().await?;
 
         Ok(())

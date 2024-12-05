@@ -3,6 +3,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use bytes::Bytes;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -21,6 +22,8 @@ pub enum Error {
     MbnError(#[from] mbn::error::Error),
     #[error("Custom error: {0}")]
     CustomError(String),
+    #[error("Stream error")]
+    StreamError(Bytes),
 }
 
 impl Into<ApiResponse<String>> for Error {
@@ -33,6 +36,8 @@ impl Into<ApiResponse<String>> for Error {
             Error::GeneralError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
             Error::MbnError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
             Error::CustomError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
+            Error::StreamError(_) => panic!("StreamError should not be converted to ApiResponse"),
+            // Error::StreamError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
         };
 
         ApiResponse {
