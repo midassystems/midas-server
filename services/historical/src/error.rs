@@ -22,8 +22,15 @@ pub enum Error {
     MbnError(#[from] mbn::error::Error),
     #[error("Custom error: {0}")]
     CustomError(String),
-    #[error("Stream error")]
-    StreamError(Bytes),
+    // #[error("Stream error")]
+    // StreamError(Bytes),
+}
+
+impl Error {
+    pub fn bytes(self) -> Bytes {
+        let response: ApiResponse<String> = self.into();
+        response.bytes()
+    }
 }
 
 impl Into<ApiResponse<String>> for Error {
@@ -36,7 +43,7 @@ impl Into<ApiResponse<String>> for Error {
             Error::GeneralError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
             Error::MbnError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
             Error::CustomError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
-            Error::StreamError(_) => panic!("StreamError should not be converted to ApiResponse"),
+            // Error::StreamError(_) => panic!("StreamError should not be converted to ApiResponse"),
             // Error::StreamError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
         };
 

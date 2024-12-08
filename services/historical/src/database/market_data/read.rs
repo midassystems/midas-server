@@ -1,18 +1,22 @@
 use crate::Result;
 use async_trait::async_trait;
 use futures::Stream;
-use mbn::encode::RecordEncoder;
 use mbn::enums::{RType, Schema};
 use mbn::records::{BboMsg, BidAskPair, Mbp1Msg, OhlcvMsg, RecordHeader, TbboMsg, TradeMsg};
-use mbn::{record_enum::RecordEnum, symbols::SymbolMap};
+use mbn::record_enum::RecordEnum;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use std::os::raw::c_char;
 use std::pin::Pin;
 use std::str::FromStr;
-use tracing::{info, error};
-use futures::stream::StreamExt;
+use tracing::info;
 
+pub async fn get_lastest_mbp_id(pool: &PgPool) -> Result<i32> {
+        let last_id: i32 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM mbp")
+            .fetch_one(pool)
+            .await?;
+        Ok(last_id)
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RetrieveParams {
@@ -28,7 +32,7 @@ impl RetrieveParams {
         Ok(schema)
     }
 
-    fn rtype(&self) -> Result<RType> {
+    pub fn rtype(&self) -> Result<RType> {
         let schema = Schema::from_str(&self.schema)?;
         Ok(RType::from(schema))
     }
@@ -81,7 +85,7 @@ impl RetrieveParams {
 pub trait RecordsQuery{
     async fn retrieve_query(
         pool: &PgPool,
-        params: &mut RetrieveParams,
+        mut params: RetrieveParams,
     ) -> Result<
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     >;
@@ -97,7 +101,7 @@ pub trait FromRow: Sized {
 impl RecordsQuery for Mbp1Msg {
     async fn retrieve_query(
         pool: &PgPool,
-        params: &mut RetrieveParams,
+        mut params: RetrieveParams,
     ) -> Result<
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     > {
@@ -115,7 +119,7 @@ impl RecordsQuery for Mbp1Msg {
         // Query to Cursor
         let cursor = sqlx::query( 
             r#"
-            SELECT m.instrument_id, m.ts_event, m.price, m.size, m.action, m.side, m.flags, m.ts_recv, m.ts_in_delta, m.sequence, i.ticker,
+            SELECT m.instrument_id, m.ts_event, m.price, m.size, m.action, m.side, m.flags, m.ts_recv, m.ts_in_delta, m.sequence, m.discriminator, i.ticker,
                    b.bid_px, b.bid_sz, b.bid_ct, b.ask_px, b.ask_sz, b.ask_ct
             FROM mbp m
             INNER JOIN instrument i ON m.instrument_id = i.id
@@ -155,6 +159,7 @@ impl FromRow for Mbp1Msg {
             ts_recv: row.try_get::<i64, _>("ts_recv")? as u64,
             ts_in_delta: row.try_get::<i32, _>("ts_in_delta")?,
             sequence: row.try_get::<i32, _>("sequence")? as u32,
+            discriminator: row.try_get::<i32, _>("discriminator")? as u32,
             levels: [BidAskPair {
                 bid_px: row.try_get::<i64, _>("bid_px")?,
                 ask_px: row.try_get::<i64, _>("ask_px")?,
@@ -171,7 +176,7 @@ impl FromRow for Mbp1Msg {
 impl RecordsQuery for TradeMsg {
     async fn retrieve_query(
         pool: &PgPool,
-        params: &mut RetrieveParams,
+        mut params: RetrieveParams,
     ) -> Result<
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     > {
@@ -232,7 +237,7 @@ impl FromRow for TradeMsg {
 impl RecordsQuery for BboMsg {
     async fn retrieve_query(
         pool: &PgPool,
-        params: &mut RetrieveParams,
+        mut params: RetrieveParams,
     ) -> Result<
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     > {
@@ -408,7 +413,7 @@ impl FromRow for BboMsg {
 impl RecordsQuery for OhlcvMsg {
     async fn retrieve_query(
         pool: &PgPool,
-        params: &mut RetrieveParams,
+        mut params: RetrieveParams,
     ) -> Result<
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     > {
@@ -498,7 +503,7 @@ impl FromRow for OhlcvMsg {
 impl RecordsQuery for RecordEnum {
     async fn retrieve_query(
         pool: &PgPool,
-        params: &mut RetrieveParams,
+        params: RetrieveParams,
     ) -> Result<Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>> {
 
         match RType::from(params.rtype().unwrap()) {
@@ -514,7 +519,7 @@ impl RecordsQuery for RecordEnum {
 
 type FromRowFn = fn(&sqlx::postgres::PgRow) -> Result<RecordEnum>;
 
-fn get_from_row_fn(rtype: RType) -> FromRowFn {
+pub fn get_from_row_fn(rtype: RType) -> FromRowFn {
     match rtype {
         RType::Mbp1 => |row| Ok(RecordEnum::Mbp1(Mbp1Msg::from_row(row)?)),
         RType::Trade => |row| Ok(RecordEnum::Trade(TradeMsg::from_row(row)?)),
@@ -523,52 +528,6 @@ fn get_from_row_fn(rtype: RType) -> FromRowFn {
         RType::Tbbo => |row| Ok(RecordEnum::Tbbo(TbboMsg::from_row(row)?)),
     }
 }
-
-
-// Helper function to process records
-pub async fn process_records(
-    pool: &PgPool,
-    params: &mut RetrieveParams,
-    batch_counter: &mut i64,
-    record_cursor: &mut std::io::Cursor<Vec<u8>>,
-    symbol_map: &mut SymbolMap,
-) -> Result<()> {
-    let rtype = RType::from(params.rtype().unwrap());
-    let from_row_fn = get_from_row_fn(rtype);
-
-    let mut encoder = RecordEncoder::new(record_cursor);
-    let mut cursor = RecordEnum::retrieve_query(&pool, params).await?;
-
-    info!("Processing queried records.");
-    while let Some(row_result) = cursor.next().await {
-        match row_result {
-            Ok(row) => {
-                let instrument_id = row.try_get::<i32, _>("instrument_id")? as u32;
-                let ticker: String = row.try_get("ticker")?;
-                
-                // Use the from_row_fn here
-                let record = from_row_fn(&row)?;
-
-                // Convert to RecordEnum and add to encoder
-                let record_ref = record.to_record_ref();
-                encoder.encode_record(&record_ref).unwrap();
-
-                // Update symbol map
-                symbol_map.add_instrument(&ticker, instrument_id);
-
-                // Increment the batch counter
-                *batch_counter += 1;
-            }
-            Err(e) => {
-                error!("Error processing row: {:?}", e);
-                return Err(e.into());
-            }
-        }
-    }
-
-    Ok(())
-}
-
 
 #[cfg(test)]
 mod test {
@@ -581,7 +540,8 @@ mod test {
     use mbn::symbols::Vendors;
     use crate::database::market_data::create::RecordInsertQueries;
     use sqlx::{PgPool, Postgres, Transaction};
-    // use crate::database::market_data::create::validate_staging;
+    use futures::stream::StreamExt;
+    use tracing::error;
 
     async fn create_instrument(pool: &PgPool) -> Result<i32> {
         let mut transaction = pool
@@ -699,6 +659,7 @@ mod test {
                 ts_recv: 1704209103644092564,
                 ts_in_delta: 17493,
                 sequence: 739763,
+                discriminator: 0,
                 levels: [BidAskPair {
                     bid_px: 1,
                     ask_px: 1,
@@ -719,6 +680,7 @@ mod test {
                 ts_recv: 1704209103644092565,
                 ts_in_delta: 17493,
                 sequence: 739763,
+                discriminator: 0,
                 levels: [BidAskPair {
                     bid_px: 1,
                     ask_px: 1,
@@ -736,7 +698,7 @@ mod test {
         let _ = transaction.commit().await;
 
         // Test
-        let mut query_params = RetrieveParams {
+        let query_params = RetrieveParams {
             symbols: vec!["AAPL".to_string()],
             start_ts: 1704209103644092563,
             end_ts: 1704209903644092567,
@@ -744,7 +706,7 @@ mod test {
         };
 
         let mut cursor =
-            Mbp1Msg::retrieve_query(&pool, &mut query_params)
+            Mbp1Msg::retrieve_query(&pool, query_params)
                 .await
                 .expect("Error on retrieve records.");
 
@@ -811,6 +773,7 @@ mod test {
                 ts_recv: 1704209103644092564,
                 ts_in_delta: 17493,
                 sequence: 739763,
+                discriminator: 0,
                 levels: [BidAskPair {
                     bid_px: 1,
                     ask_px: 1,
@@ -831,6 +794,7 @@ mod test {
                 ts_recv: 1704209103644092565,
                 ts_in_delta: 17493,
                 sequence: 739763,
+                discriminator: 0,
                 levels: [BidAskPair {
                     bid_px: 1,
                     ask_px: 1,
@@ -848,7 +812,7 @@ mod test {
         let _ = transaction.commit().await;
 
         // Test
-        let mut query_params = RetrieveParams {
+        let query_params = RetrieveParams {
             symbols: vec!["AAPL".to_string()],
             start_ts: 1704209103644092563,
             end_ts: 1704209903644092567,
@@ -856,7 +820,7 @@ mod test {
         };
 
         let mut cursor =
-            TbboMsg::retrieve_query(&pool, &mut query_params)
+            TbboMsg::retrieve_query(&pool, query_params)
                 .await
                 .expect("Error on retrieve records.");
 
@@ -924,6 +888,7 @@ mod test {
                 ts_recv: 1704209103644092564,
                 ts_in_delta: 17493,
                 sequence: 739763,
+                discriminator: 0,
                 levels: [BidAskPair {
                     bid_px: 1,
                     ask_px: 1,
@@ -944,6 +909,7 @@ mod test {
                 ts_recv: 1704209103644092565,
                 ts_in_delta: 17493,
                 sequence: 739763,
+                discriminator: 0,
                 levels: [BidAskPair {
                     bid_px: 1,
                     ask_px: 1,
@@ -961,7 +927,7 @@ mod test {
         let _ = transaction.commit().await;
 
         // Test
-        let mut query_params = RetrieveParams {
+        let query_params = RetrieveParams {
             symbols: vec!["AAPL".to_string()],
             start_ts: 1704209103644092563,
             end_ts: 1704209903644092567,
@@ -970,7 +936,7 @@ mod test {
 
 
         let mut cursor =
-            TradeMsg::retrieve_query(&pool, &mut query_params)
+            TradeMsg::retrieve_query(&pool, query_params)
                 .await
                 .expect("Error on retrieve records.");
 
@@ -1039,6 +1005,7 @@ mod test {
                 ts_recv: 1704209103644092564,
                 ts_in_delta: 17493,
                 sequence: 739763,
+                discriminator: 0,
                 levels: [BidAskPair {
                     bid_px: 1,
                     ask_px: 1,
@@ -1059,6 +1026,7 @@ mod test {
                 ts_recv: 1704209103644092565,
                 ts_in_delta: 17493,
                 sequence: 739763,
+                discriminator: 0,
                 levels: [BidAskPair {
                     bid_px: 1,
                     ask_px: 1,
@@ -1076,7 +1044,7 @@ mod test {
         let _ = transaction.commit().await;
 
         // Test
-        let mut query_params = RetrieveParams {
+        let query_params = RetrieveParams {
             symbols: vec!["AAPL".to_string()],
             start_ts: 1704209103644092563,
             end_ts: 1704209903644092567,
@@ -1084,7 +1052,7 @@ mod test {
         };
 
         let mut cursor =
-            BboMsg::retrieve_query(&pool, &mut query_params)
+            BboMsg::retrieve_query(&pool, query_params)
                 .await
                 .expect("Error on retrieve records.");
 
@@ -1152,6 +1120,7 @@ mod test {
                 ts_recv: 1704209103644092562,
                 ts_in_delta: 17493,
                 sequence: 739763,
+                discriminator: 0,
                 levels: [BidAskPair {
                     bid_px: 1,
                     ask_px: 1,
@@ -1172,6 +1141,8 @@ mod test {
                 ts_recv: 1704209104645092564,
                 ts_in_delta: 17493,
                 sequence: 739763,
+                discriminator: 0,
+
                 levels: [BidAskPair {
                     bid_px: 1,
                     ask_px: 1,
@@ -1192,6 +1163,8 @@ mod test {
                 ts_recv: 1704295503644092562,
                 ts_in_delta: 17493,
                 sequence: 739763,
+                discriminator: 0,
+
                 levels: [BidAskPair {
                     bid_px: 1,
                     ask_px: 1,
@@ -1209,7 +1182,7 @@ mod test {
         let _ = transaction.commit().await;
 
         // Test
-        let mut query_params = RetrieveParams {
+        let query_params = RetrieveParams {
             symbols: vec!["AAPL".to_string()],
             start_ts: 1704209103644092562,
             end_ts: 1704295503654092563,
@@ -1217,7 +1190,7 @@ mod test {
         };
         
         let mut cursor =
-           OhlcvMsg::retrieve_query(&pool, &mut query_params)
+           OhlcvMsg::retrieve_query(&pool, query_params)
                 .await
                 .expect("Error on retrieve records.");
 

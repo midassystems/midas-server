@@ -1,4 +1,5 @@
-use crate::database::market_data::create::InsertBatch;
+use crate::database::market_data::create::{rollback_all_batches, InsertBatch};
+use crate::database::market_data::read::get_lastest_mbp_id;
 use crate::response::ApiResponse;
 use crate::{Error, Result};
 use async_stream::stream;
@@ -16,17 +17,22 @@ pub struct RecordLoader {
     records_in_batch: usize,
     batch: InsertBatch,
     pool: PgPool,
+    last_id: i32,
 }
 
 impl RecordLoader {
-    pub fn new(batch_size: usize, pool: PgPool) -> Self {
-        RecordLoader {
+    pub async fn new(batch_size: usize, pool: PgPool) -> Result<Self> {
+        let last_id = get_lastest_mbp_id(&pool).await?;
+
+        Ok(RecordLoader {
             batch_size,
             records_in_batch: 0,
             batch: InsertBatch::new(),
             pool,
-        }
+            last_id,
+        })
     }
+
     pub fn get_records_in_batch(&self) -> usize {
         self.records_in_batch
     }
@@ -85,60 +91,32 @@ impl RecordLoader {
         }
     }
 
-    // pub async fn validate(&self) -> Result<ApiResponse<String>> {
-    //     let mut tx = self.pool.begin().await?;
-    //     match validate_staging(&mut tx).await {
-    //         Ok(_) => {
-    //             tx.commit().await?;
-    //             let response = ApiResponse::new(
-    //                 "success",
-    //                 "Merged records into production.",
-    //                 StatusCode::OK,
-    //                 "".to_string(),
-    //             );
-    //             Ok(response)
-    //         }
-    //         Err(e) => {
-    //             tx.rollback().await?;
-    //             error!("Failed to merge staging into production: {:?}", e);
-    //             let response = ApiResponse::new(
-    //                 "failed",
-    //                 &format!("Failed merge staging into production: {:?}", e),
-    //                 StatusCode::CONFLICT,
-    //                 "".to_string(),
-    //             );
-    //             Ok(response)
-    //         }
-    //     }
-    // }
-
-    // /// Handles rollback and clears staging data on errors or cancellations.
-    // pub async fn cleanup(&self) -> Result<ApiResponse<String>> {
-    //     let mut tx = self.pool.begin().await?;
-    //     match clear_staging(&mut tx).await {
-    //         Ok(_) => {
-    //             tx.commit().await?;
-    //             let response = ApiResponse::new(
-    //                 "success",
-    //                 "Cleared staging sucessfully.",
-    //                 StatusCode::OK,
-    //                 "".to_string(),
-    //             );
-    //             Ok(response)
-    //         }
-    //         Err(e) => {
-    //             tx.rollback().await?;
-    //             error!("Failed to clear staging: {:?}", e);
-    //             let response = ApiResponse::new(
-    //                 "failed",
-    //                 &format!("Failed to clear staging: {:?}", e),
-    //                 StatusCode::CONFLICT,
-    //                 "".to_string(),
-    //             );
-    //             Ok(response)
-    //         }
-    //     }
-    // }
+    pub async fn cleanup(&self) -> Result<ApiResponse<String>> {
+        let mut tx = self.pool.begin().await?;
+        match rollback_all_batches(self.last_id, &mut tx).await {
+            Ok(_) => {
+                tx.commit().await?;
+                let response = ApiResponse::new(
+                    "success",
+                    "Removed all commits from this batch process.",
+                    StatusCode::OK,
+                    "".to_string(),
+                );
+                Ok(response)
+            }
+            Err(e) => {
+                tx.rollback().await?;
+                error!("Fialed to remove all batched from current process: {:?}", e);
+                let response = ApiResponse::new(
+                    "failed",
+                    &format!("Fialed to remove all batched from current process: {:?}", e),
+                    StatusCode::CONFLICT,
+                    "".to_string(),
+                );
+                Ok(response)
+            }
+        }
+    }
 
     pub async fn process_records<R>(
         mut self,
@@ -148,6 +126,15 @@ impl RecordLoader {
         R: std::io::Read + Send + 'static,
     {
         let p_stream = stream! {
+            // First responnse will contain the status of the mbp table before beginning
+            let response = ApiResponse::new(
+                "success",
+                &format!("Max ID before inserting {}", self.last_id),
+                StatusCode::OK,
+                format!("{}", self.last_id),
+            );
+            yield Ok(response.bytes());
+
             // Initialize the decoder
             let mut decode_iter = decoder.decode_iterator();
 
@@ -156,27 +143,25 @@ impl RecordLoader {
                     Ok(record) => {
                         match self.update_batch(record).await {
                             Ok(Some(response)) =>{
-                                // Serialize the response to Bytes
-                                let bytes = Bytes::from(serde_json::to_string(&response).unwrap());
-
-                                // Yield the Bytes to the stream
-                                yield Ok::<Bytes, Error>(bytes);
+                                // Yield response as Bytes to the stream
+                                yield Ok::<Bytes, Error>(response.bytes());
 
                                 // Break the stream if the response status is not "success"
                                 if response.status != "success" {
+                                    let c_response : Bytes = self.cleanup().await.unwrap().bytes();
+                                    yield Ok(c_response);
+
                                     return;
                                 }
                             }
-                            Ok(None) => {} // No response for intermediate records
+                            Ok(None) => {}
                             Err(e) => {
                                 error!("Error processing record: {:?}", e);
-                                let response = ApiResponse::new(
-                                    "failed",
-                                    &format!("Error processing record: {:?}", e),
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                    "".to_string(),
-                                );
-                                yield Ok(Bytes::from(serde_json::to_string(&response).unwrap()));
+                                yield Ok(e.bytes());
+
+                                let c_response : Bytes = self.cleanup().await.unwrap().bytes();
+                                yield Ok(c_response);
+
                                 return;
                             }
                         }
@@ -189,10 +174,12 @@ impl RecordLoader {
                             StatusCode::INTERNAL_SERVER_ERROR,
                             "".to_string(),
                         );
-                        let error_bytes = Bytes::from(serde_json::to_string(&response).unwrap());
-                        yield Ok(error_bytes);
-                        return;
+                        yield Ok(response.bytes());
 
+                        let c_response : Bytes = self.cleanup().await.unwrap().bytes();
+                        yield Ok(c_response);
+
+                        return;
                     }
                 }
             }
@@ -201,90 +188,29 @@ impl RecordLoader {
             if self.get_records_in_batch() > 0 {
                 match self.commit_batch().await {
                     Ok(response) => {
-                        // Serialize the response to Bytes
-                        let bytes = Bytes::from(serde_json::to_string(&response).unwrap());
-
-                        // Yield the Bytes to the stream
-                        yield Ok::<Bytes, Error>(bytes);
+                        // Yield response as Bytes to the stream
+                        yield Ok::<Bytes, Error>(response.bytes());
 
                         // Break the stream if the response status is not "success"
                         if response.status != "success" {
-                            // let _ = self.cleanup().await?;
+                            let c_response : Bytes = self.cleanup().await.unwrap().bytes();
+                            yield Ok(c_response);
                             return;
                         }
                     }
                     Err(e) => {
                         error!("Error processing record: {:?}", e);
-                        let response = ApiResponse::new(
-                            "failed",
-                            &format!("Error processing record: {:?}", e),
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "".to_string(),
-                        );
-                        yield Ok(Bytes::from(serde_json::to_string(&response).unwrap()));
-                        // let _ = self.cleanup().await?;
+                        yield Ok(e.bytes());
+
+                        let c_response : Bytes = self.cleanup().await.unwrap().bytes();
+                        yield Ok(c_response);
+
                         return;
                     }
 
                 }
 
             }
-            // match self.validate().await {
-            //         Ok(response) => {
-            //             // Serialize the response to Bytes
-            //             let bytes = Bytes::from(serde_json::to_string(&response).unwrap());
-            //
-            //             // Yield the Bytes to the stream
-            //             yield Ok::<Bytes, Error>(bytes);
-            //
-            //             // Break the stream if the response status is not "success"
-            //             if response.status != "success" {
-            //                 let _ = self.cleanup().await?;
-            //                 return;
-            //             }
-            //         }
-            //         Err(e) => {
-            //             error!("Error processing record: {:?}", e);
-            //             let response = ApiResponse::new(
-            //                 "failed",
-            //                 &format!("Error processing record: {:?}", e),
-            //                 StatusCode::INTERNAL_SERVER_ERROR,
-            //                 "".to_string(),
-            //             );
-            //             yield Ok(Bytes::from(serde_json::to_string(&response).unwrap()));
-            //             let _ = self.cleanup().await?;
-            //             return;
-            //         }
-            //
-            //     }
-
-            // match self.cleanup().await {
-            //         Ok(response) => {
-            //             // Serialize the response to Bytes
-            //             let bytes = Bytes::from(serde_json::to_string(&response).unwrap());
-            //
-            //             // Yield the Bytes to the stream
-            //             yield Ok::<Bytes, Error>(bytes);
-            //
-            //             // Break the stream if the response status is not "success"
-            //             if response.status != "success" {
-            //                 return;
-            //             }
-            //         }
-            //         Err(e) => {
-            //             error!("Error processing record: {:?}", e);
-            //             let response = ApiResponse::new(
-            //                 "failed",
-            //                 &format!("Error processing record: {:?}", e),
-            //                 StatusCode::INTERNAL_SERVER_ERROR,
-            //                 "".to_string(),
-            //             );
-            //             yield Ok(Bytes::from(serde_json::to_string(&response).unwrap()));
-            //             return;
-            //         }
-            //
-            // }
-
 
             // Success response
             let response = ApiResponse::new(
@@ -293,7 +219,7 @@ impl RecordLoader {
                 StatusCode::OK,
                 "".to_string(),
             );
-            yield Ok(Bytes::from(serde_json::to_string(&response).unwrap()));
+            yield Ok(response.bytes());
 
         };
         Box::pin(p_stream) // Explicitly pin the stream and return it

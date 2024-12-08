@@ -2,6 +2,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -13,7 +14,7 @@ pub struct ApiResponse<T> {
     pub data: T,
 }
 
-impl<T> ApiResponse<T> {
+impl<T: Serialize> ApiResponse<T> {
     pub fn new(status: &str, message: &str, code: StatusCode, data: T) -> Self {
         Self {
             status: status.to_string(),
@@ -21,6 +22,11 @@ impl<T> ApiResponse<T> {
             code: code.as_u16(),
             data,
         }
+    }
+
+    pub fn bytes(&self) -> Bytes {
+        let json_string = serde_json::to_string(self).unwrap();
+        Bytes::from(json_string)
     }
 }
 
@@ -53,5 +59,18 @@ mod tests {
         assert_eq!(response.code, 200);
         assert_eq!(response.message, msg);
         assert_eq!(response.data, "");
+    }
+
+    #[test]
+    fn test_into_bytes() {
+        let status = "success";
+        let msg = "message";
+        let code = StatusCode::OK;
+        let response = ApiResponse::new(status, msg, code, "".to_string());
+
+        let bytes = response.bytes();
+
+        // Test
+        assert!(bytes.len() > 0);
     }
 }

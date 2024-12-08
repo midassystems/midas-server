@@ -455,6 +455,7 @@ async fn test_records_create() -> Result<()> {
         ts_recv: 1704209103644092564,
         ts_in_delta: 17493,
         sequence: 739763,
+        discriminator: 0,
         levels: [BidAskPair {
             bid_px: 1,
             ask_px: 1,
@@ -475,6 +476,7 @@ async fn test_records_create() -> Result<()> {
         ts_recv: 1704209103644092564,
         ts_in_delta: 17493,
         sequence: 739763,
+        discriminator: 0,
         levels: [BidAskPair {
             bid_px: 1,
             ask_px: 1,
@@ -585,6 +587,7 @@ async fn test_records_get() -> Result<()> {
         ts_recv: 1704209103644092564,
         ts_in_delta: 17493,
         sequence: 739763,
+        discriminator: 0,
         levels: [BidAskPair {
             bid_px: 1,
             ask_px: 1,
@@ -605,6 +608,7 @@ async fn test_records_get() -> Result<()> {
         ts_recv: 1704209103644092564,
         ts_in_delta: 17493,
         sequence: 739763,
+        discriminator: 0,
         levels: [BidAskPair {
             bid_px: 1,
             ask_px: 1,

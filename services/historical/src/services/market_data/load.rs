@@ -38,7 +38,7 @@ pub async fn create_record(
     let decoder = RecordDecoder::new(cursor);
 
     // Initialize the loader
-    let loader = RecordLoader::new(1000, pool);
+    let loader = RecordLoader::new(1000, pool).await?;
     let progress_stream = loader.process_records(decoder).await;
 
     Ok(StreamBody::new(progress_stream))
@@ -53,10 +53,9 @@ pub async fn bulk_upload(
 
     // Initialize the decoder
     let decoder = RecordDecoder::<BufReader<File>>::from_file(&path)?;
-    // let mut decode_iter = decoder.decode_iterator();
 
     // Initialize the loader
-    let loader = RecordLoader::new(20_000, pool);
+    let loader = RecordLoader::new(20_000, pool).await?;
     let progress_stream = loader.process_records(decoder).await;
 
     Ok(StreamBody::new(progress_stream))
@@ -121,6 +120,8 @@ mod test {
             ts_recv: 1704209103644092564,
             ts_in_delta: 17493,
             sequence: 739763,
+            discriminator: 0,
+
             levels: [BidAskPair {
                 bid_px: 1,
                 ask_px: 1,
@@ -141,6 +142,8 @@ mod test {
             ts_recv: 1704209103644092566,
             ts_in_delta: 17493,
             sequence: 739763,
+            discriminator: 0,
+
             levels: [BidAskPair {
                 bid_px: 1,
                 ask_px: 1,
@@ -197,7 +200,6 @@ mod test {
                 }
             }
         }
-        println!("{:?}", success_responses);
         assert!(success_responses.len() > 0);
         assert!(error_responses.len() == 0);
 
@@ -254,6 +256,8 @@ mod test {
             ts_recv: 1704209103644092564,
             ts_in_delta: 17493,
             sequence: 739763,
+            discriminator: 0,
+
             levels: [BidAskPair {
                 bid_px: 1,
                 ask_px: 1,
@@ -274,6 +278,8 @@ mod test {
             ts_recv: 1704209103644092566,
             ts_in_delta: 17493,
             sequence: 739763,
+            discriminator: 0,
+
             levels: [BidAskPair {
                 bid_px: 1,
                 ask_px: 1,
@@ -295,7 +301,7 @@ mod test {
 
         let file = "tests/data/test_bulk_upload.bin";
         let path = PathBuf::from(file);
-        let _ = encoder.write_to_file(&path);
+        let _ = encoder.write_to_file(&path, false);
 
         // Test
         let result = bulk_upload(Extension(pool.clone()), Json(file.to_string()))
@@ -333,9 +339,6 @@ mod test {
                 }
             }
         }
-
-        // Log stored responses (optional)
-        println!("{:?}", success_responses);
 
         assert!(success_responses.len() > 0);
         assert!(error_responses.len() == 0);
@@ -384,7 +387,7 @@ mod test {
 
     #[sqlx::test]
     #[serial]
-    #[ignore]
+    // #[ignore]
     async fn test_bulk_upload_error() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
@@ -422,6 +425,7 @@ mod test {
             ts_recv: 1704209103644092566,
             ts_in_delta: 17493,
             sequence: 739763,
+            discriminator: 0,
             levels: [BidAskPair {
                 bid_px: 1,
                 ask_px: 1,
@@ -443,6 +447,7 @@ mod test {
             ts_recv: 1704209103644092566,
             ts_in_delta: 17493,
             sequence: 739763,
+            discriminator: 0,
             levels: [BidAskPair {
                 bid_px: 1,
                 ask_px: 1,
@@ -464,7 +469,7 @@ mod test {
 
         let file = "tests/data/test_bulk_upload.bin";
         let path = PathBuf::from(file);
-        let _ = encoder.write_to_file(&path);
+        let _ = encoder.write_to_file(&path, false);
 
         // Test
         let result = bulk_upload(Extension(pool.clone()), Json(file.to_string()))
@@ -502,9 +507,7 @@ mod test {
                 }
             }
         }
-
-        // Log stored responses (optional)
-        assert!(success_responses.len() == 0);
+        assert!(success_responses.len() == 2); // Successful rollback of all batches in process
         assert!(error_responses.len() > 0);
 
         // Cleanup
