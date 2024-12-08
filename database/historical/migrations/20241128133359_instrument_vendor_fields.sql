@@ -1,9 +1,0 @@
--- Add migration script here
-ALTER TABLE instrument
-ADD COLUMN vendor VARCHAR(50) NOT NULL DEFAULT 'unknown',
-ADD COLUMN stype VARCHAR(50),
-ADD COLUMN dataset VARCHAR(50),
-ADD COLUMN last_available BIGINT NOT NULL DEFAULT 0,
-ADD COLUMN first_available BIGINT NOT NULL DEFAULT 0,
-ADD COLUMN active BOOL NOT NULL DEFAULT TRUE;
-
