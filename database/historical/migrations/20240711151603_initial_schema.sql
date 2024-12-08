@@ -2,7 +2,13 @@
 CREATE TABLE IF NOT EXISTS instrument (
   id SERIAL PRIMARY KEY,
   ticker VARCHAR(10) NOT NULL UNIQUE,
-  name VARCHAR(25) NOT NULL
+  name VARCHAR(25) NOT NULL,
+  vendor VARCHAR(50) NOT NULL DEFAULT 'unknown',
+  stype VARCHAR(50),
+  dataset VARCHAR(50),
+  last_available BIGINT NOT NULL DEFAULT 0,
+  first_available BIGINT NOT NULL DEFAULT 0,
+  active BOOL NOT NULL DEFAULT TRUE
 );
 
 CREATE TABLE IF NOT EXISTS mbp (
@@ -17,12 +23,13 @@ CREATE TABLE IF NOT EXISTS mbp (
   ts_recv BIGINT NOT NULL, -- corresponds to uint64_t, stored as TIMESTAMP in QuestDB
   ts_in_delta INTEGER NOT NULL, -- corresponds to int32_t
   sequence INTEGER NOT NULL, -- corresponds to uint32_t
+  discriminator INTEGER NOT NULL,
   order_book_hash VARCHAR NOT NULL,
   CONSTRAINT fk_instrument_mbp
     FOREIGN KEY(instrument_id) 
       REFERENCES instrument(id)
       ON DELETE CASCADE,
-  CONSTRAINT unique_instrument_ts_sequence_event UNIQUE (instrument_id, ts_event, price, size, flags, sequence, order_book_hash, ts_recv, action, side)
+  CONSTRAINT unique_instrument_ts_sequence_event UNIQUE (instrument_id, ts_event, price, size, flags, sequence, order_book_hash, ts_recv, action, side, discriminator)
 );
 
 CREATE TABLE IF NOT EXISTS bid_ask (
