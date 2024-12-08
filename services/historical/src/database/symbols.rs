@@ -1,6 +1,6 @@
 use crate::Result;
 use async_trait::async_trait;
-use mbn::symbols::Instrument;
+use mbn::symbols::{Instrument, SymbolMap};
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use tracing::info;
 struct InstrumentWrapper(Instrument);
@@ -176,6 +176,31 @@ impl InstrumentsQueries for Instrument {
     }
 }
 
+pub async fn query_symbols_map(pool: &PgPool, tickers: &Vec<String>) -> Result<SymbolMap> {
+    info!("Fetching symbols map.");
+
+    let rows = sqlx::query(
+        r#"
+            SELECT id, ticker 
+            FROM instrument
+            WHERE ticker = ANY($1)
+            "#,
+    )
+    .bind(tickers)
+    .fetch_all(pool) // Use fetch_optional instead of fetch_one
+    .await?;
+
+    let mut map = SymbolMap::new();
+
+    for row in rows {
+        let id: i32 = row.try_get("id")?;
+        let ticker: String = row.try_get("ticker")?;
+        map.add_instrument(&ticker, id as u32);
+    }
+
+    Ok(map)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -194,6 +219,116 @@ mod test {
         }
 
         Ok(map)
+    }
+
+    pub async fn create_instrument_dummy(ticker: &str) -> Result<i32> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+        let mut transaction = pool.begin().await.expect("Error settign up database.");
+
+        let instrument = Instrument::new(
+            None,
+            ticker,
+            "name",
+            Vendors::Databento,
+            Some("continuous".to_string()),
+            Some("GLBX.MDP3".to_string()),
+            1704672000000000000,
+            1704672000000000000,
+            true,
+        );
+        let id = instrument
+            .insert_instrument(&mut transaction)
+            .await
+            .expect("Error inserting symbol.");
+        let _ = transaction.commit().await;
+
+        Ok(id)
+    }
+
+    #[sqlx::test]
+    #[serial]
+    async fn test_query_symbol_map() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+        let mut ids = Vec::new();
+        let tickers = vec!["AAPL".to_string(), "AAPL1".to_string(), "AAPL2".to_string()];
+
+        for ticker in &tickers {
+            let id = create_instrument_dummy(ticker).await?;
+            ids.push(id);
+        }
+
+        // Test
+        let map: SymbolMap = query_symbols_map(&pool, &tickers).await?;
+
+        // Validate
+        assert_eq!(3, map.map.len());
+
+        // Cleanup
+        for id in ids {
+            let mut transaction = pool
+                .begin()
+                .await
+                .expect("Error setting up test transaction.");
+            Instrument::delete_instrument(&mut transaction, id)
+                .await
+                .expect("Error on delete.");
+            let _ = transaction.commit().await;
+        }
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[serial]
+    async fn test_get_symbol_map_partial() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+        let mut ids = Vec::new();
+        let tickers = vec!["AAPL".to_string(), "AAPL1".to_string(), "AAPL2".to_string()];
+
+        let id = create_instrument_dummy("AAPL").await?;
+        ids.push(id);
+
+        let id = create_instrument_dummy("AAPL1").await?;
+        ids.push(id);
+
+        // Test
+        let map = query_symbols_map(&pool, &tickers).await?;
+
+        // Validate
+        assert_eq!(2, map.map.len());
+
+        // Cleanup
+        for id in ids {
+            let mut transaction = pool
+                .begin()
+                .await
+                .expect("Error setting up test transaction.");
+            Instrument::delete_instrument(&mut transaction, id)
+                .await
+                .expect("Error on delete.");
+            let _ = transaction.commit().await;
+        }
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[serial]
+    async fn test_query_symbol_map_none() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+        let tickers = vec!["AAPL".to_string(), "AAPL1".to_string(), "AAPL2".to_string()];
+
+        // Test
+        let map = query_symbols_map(&pool, &tickers).await?;
+
+        // Validate
+        assert_eq!(0, map.map.len());
+
+        Ok(())
     }
 
     #[sqlx::test]

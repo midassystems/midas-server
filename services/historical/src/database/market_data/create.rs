@@ -4,6 +4,7 @@ use mbn::records::{BidAskPair, Mbp1Msg};
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Transaction};
 
+
 // Function to compute a unique hash for the order book state
 fn compute_order_book_hash(levels: &[BidAskPair]) -> String {
     let mut hasher = Sha256::new();
@@ -23,10 +24,21 @@ fn compute_order_book_hash(levels: &[BidAskPair]) -> String {
     result.iter().map(|byte| format!("{:02x}", byte)).collect()
 }
 
+pub async fn rollback_all_batches(last_id: i32, tx: &mut Transaction<'_, Postgres>) -> Result<()> {
+    sqlx::query("DELETE FROM mbp WHERE id > $1")
+        .bind(last_id)
+        .execute(tx)
+        .await?;
+
+
+    Ok(())
+}
+
+ 
 
 /// Primary insert method
 pub struct InsertBatch {
-    pub mbp_values: Vec<(i32, i64, i64, i32, i32, i32, i32, i64, i32, i32, String)>,
+    pub mbp_values: Vec<(i32, i64, i64, i32, i32, i32, i32, i64, i32, i32, i32, String)>,
     pub bid_ask_batches: Vec<Vec<(i32, i64, i32, i32, i64, i32, i32)>>,
 
 }
@@ -54,6 +66,7 @@ impl InsertBatch {
             record.ts_recv as i64,
             record.ts_in_delta,
             record.sequence as i32,
+            record.discriminator as i32, 
             order_book_hash
         ));
 
@@ -86,9 +99,10 @@ impl InsertBatch {
         let mut ts_recvs = Vec::new();
         let mut ts_in_deltas = Vec::new();
         let mut sequences = Vec::new();
+        let mut discriminators = Vec::new();
         let mut order_book_hashes = Vec::new();
 
-        for (id, ts, price, size, action, side, flag, recv, delta, seq, hash) in &self.mbp_values {
+        for (id, ts, price, size, action, side, flag, recv, delta, seq, discrim, hash) in &self.mbp_values {
             instrument_ids.push(*id);
             ts_events.push(*ts);
             prices.push(*price);
@@ -99,15 +113,16 @@ impl InsertBatch {
             ts_recvs.push(*recv);
             ts_in_deltas.push(*delta);
             sequences.push(*seq);
+            discriminators.push(*discrim);
             order_book_hashes.push(hash.as_str()); // Use &str for the string
         }
 
         // INsert into mbp
+        // ON CONFLICT DO NOT/* H */ING
         let mbp_ids: Vec<i32> = sqlx::query_scalar(
             r#"
-            INSERT INTO mbp (instrument_id, ts_event, price, size, action, side, flags, ts_recv, ts_in_delta, sequence, order_book_hash)
-            SELECT * FROM UNNEST($1::int[], $2::bigint[], $3::bigint[], $4::int[], $5::int[], $6::int[], $7::int[], $8::bigint[], $9::int[], $10::int[], $11::text[])
-            ON CONFLICT DO NOTHING
+            INSERT INTO mbp (instrument_id, ts_event, price, size, action, side, flags, ts_recv, ts_in_delta, sequence, discriminator, order_book_hash)
+            SELECT * FROM UNNEST($1::int[], $2::bigint[], $3::bigint[], $4::int[], $5::int[], $6::int[], $7::int[], $8::bigint[], $9::int[], $10::int[], $11::int[], $12::text[])
             RETURNING id
             "#
         )
@@ -121,6 +136,7 @@ impl InsertBatch {
         .bind(&ts_recvs)
         .bind(&ts_in_deltas)
         .bind(&sequences)
+        .bind(&discriminators)
         .bind(&order_book_hashes) 
         .fetch_all(&mut *tx)
         .await?;
@@ -194,8 +210,8 @@ impl RecordInsertQueries for Mbp1Msg {
         // Insert into mbp table
         let mbp_id: i32 = sqlx::query_scalar(
             r#"
-            INSERT INTO mbp (instrument_id, ts_event, price, size, action, side,flags, ts_recv, ts_in_delta, sequence, order_book_hash)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            INSERT INTO mbp (instrument_id, ts_event, price, size, action, side,flags, ts_recv, ts_in_delta, sequence, discriminator, order_book_hash)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             RETURNING id
             "#
         )
@@ -209,6 +225,7 @@ impl RecordInsertQueries for Mbp1Msg {
         .bind(self.ts_recv as i64)
         .bind(self.ts_in_delta)
         .bind(self.sequence as i32)
+        .bind(self.discriminator as i32)
         .bind(&order_book_hash) // Bind the computed hash
         .fetch_one(&mut *tx)
         .await?;
@@ -243,7 +260,6 @@ mod test {
     use super::*;
     use crate::database::init::init_db;
     use crate::database::symbols::*;
-    use crate::services::market_data::retrieve::get_records;
     use mbn::enums::{Action, Side};
     use mbn::record_enum::RecordEnum;
     use mbn::symbols::Instrument;
@@ -252,13 +268,6 @@ mod test {
     use sqlx::{PgPool, Postgres, Transaction};
     use mbn::records::{BidAskPair, Mbp1Msg, RecordHeader};
     use std::os::raw::c_char;
-    use crate::database::market_data::read::RetrieveParams;
-    use mbn::enums::Schema;
-    use axum::response::IntoResponse;
-    use axum::{Extension, Json}; 
-    use mbn::decode::Decoder;
-    use std::io::Cursor;
-    use hyper::body::HttpBody as _;
     use mbn::record_ref::RecordRef;
     use mbn::encode::RecordEncoder;
     use std::path::PathBuf;
@@ -327,39 +336,10 @@ mod test {
     
         Ok(())
     }
-
-    async fn retrieve_records(
-        pool : PgPool,
-        params: RetrieveParams,
-        )  -> anyhow::Result<Vec<RecordEnum>> {
-
-
-        let response = get_records(Extension(pool), Json(params))
-            .await
-            .into_response();
-
-        let mut body = response.into_body();
-
-        // Collect streamed response
-        let mut buffer = Vec::new();
-        while let Some(chunk) = body.data().await {
-            match chunk {
-                Ok(bytes) => buffer.extend_from_slice(&bytes),
-                Err(e) => panic!("Error while reading chunk: {:?}", e),
-            }
-        }
-
-        let cursor = Cursor::new(buffer);
-        let mut decoder = Decoder::new(cursor)?;
-        let records = decoder.decode()?;
-
-        Ok(records)
-    
-    }
      
     #[sqlx::test]
     #[serial]
-    #[ignore]
+    // #[ignore]
     async fn test_create_record() {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
@@ -386,6 +366,7 @@ mod test {
                 ts_recv: 1704209103644092564,
                 ts_in_delta: 17493,
                 sequence: 739763,
+                discriminator:0,
                 levels: [BidAskPair {
                     bid_px: 1,
                     ask_px: 1,
@@ -406,6 +387,7 @@ mod test {
                 ts_recv: 1704209103644092564,
                 ts_in_delta: 17493,
                 sequence: 739763,
+                discriminator:0,
                 levels: [BidAskPair {
                     bid_px: 1,
                     ask_px: 1,
@@ -435,7 +417,7 @@ mod test {
 
     #[sqlx::test]
     #[serial]
-    #[ignore]
+    // #[ignore]
     async fn test_insert_batch() ->anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
@@ -461,6 +443,7 @@ mod test {
             ts_recv: 1704209103644092564,
             ts_in_delta: 17493,
             sequence: 739763,
+            discriminator:0,
             levels: [BidAskPair {
                 bid_px: 1,
                 ask_px: 1,
@@ -481,6 +464,7 @@ mod test {
             ts_recv: 1704209103644092566,
             ts_in_delta: 17493,
             sequence: 739763,
+            discriminator:0,
             levels: [BidAskPair {
                 bid_px: 1,
                 ask_px: 1,
@@ -502,7 +486,7 @@ mod test {
 
         let file = "tests/data/test_bulk_upload.bin";
         let path = PathBuf::from(file);
-        let _ = encoder.write_to_file(&path);
+        let _ = encoder.write_to_file(&path, false);
 
         // Test
         let result = insert_batch_records(pool.clone(), path.clone()).await?;
@@ -558,6 +542,7 @@ mod test {
                 ts_recv: 1704209103644092562,
                 ts_in_delta: 17493,
                 sequence: 739763,
+                discriminator:0,
                 levels: [BidAskPair {
                     bid_px: 1,
                     ask_px: 1,
@@ -578,6 +563,7 @@ mod test {
                 ts_recv: 1704209103644092562,
                 ts_in_delta: 17493,
                 sequence: 739763,
+                discriminator:0,
                 levels: [BidAskPair {
                     bid_px: 1,
                     ask_px: 1,
@@ -595,40 +581,18 @@ mod test {
             insert_batch.process(record).await?;
         }
         
-        insert_batch.execute(&mut transaction).await?;
-        transaction.commit().await?;
+        // Simulate and check for failure
+        match insert_batch.execute(&mut transaction).await {
+            Ok(_) => {
+                panic!("Expected an error, but the operation succeeded!");
+            }
+            Err(e) => {
+                assert!(e.to_string().contains("duplicate key value"), "Unexpected error message: {}", e);
+            }
+        }
 
-        // let _result = insert_records(&mut transaction, records.clone())
-        //     .await
-        //     .expect("Error inserting records.");
-        // transaction.commit().await?;
-
-
-        // Test
-        // let mut transaction = pool
-        //     .begin()
-        //     .await
-        //     .expect("Error setting up test transaction.");
-        // let _ = validate_staging(&mut transaction).await?;
-        // transaction.commit().await?;
-
-        // let mut transaction = pool
-        //     .begin()
-        //     .await
-        //     .expect("Error setting up test transaction.");
-        // let _ = clear_staging(&mut transaction).await?;
-        // transaction.commit().await?;
-
-        // Validate 
-        let params = RetrieveParams {
-            symbols: vec!["AAPL".to_string()],
-            start_ts: 1704209103644092561,
-            end_ts: 1704209903644092569,
-            schema: Schema::Mbp1.to_string(),
-        };
-        let ret_records = retrieve_records(pool.clone(), params).await?;
-
-        assert_eq!(ret_records.len(), 1);
+        // Ensure transaction is not committed after a failure
+        transaction.rollback().await?;
 
         // Cleanup
         let mut transaction = pool

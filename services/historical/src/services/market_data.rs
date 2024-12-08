@@ -1,5 +1,6 @@
 pub mod load;
 pub mod record_loader;
+pub mod record_retriever;
 pub mod retrieve;
 
 // pub mod streamer;
