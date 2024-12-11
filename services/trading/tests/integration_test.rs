@@ -123,3 +123,95 @@ async fn test_backtest_get() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+#[serial]
+async fn test_backtest_get_by_name() -> Result<()> {
+    // Initialize the app with the test router
+    let app = create_app().await;
+
+    // Mock Data
+    let mock_data =
+        fs::read_to_string("tests/data/test_data.backtest.json").expect("Unable to read file");
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/trading/backtest/create")
+        .header("content-type", "application/json")
+        .body(Body::from(mock_data.to_string()))
+        .unwrap();
+
+    let response = app.oneshot(request).await.unwrap();
+    let api_response: ApiResponse<i32> = parse_response(response).await.unwrap();
+    let id = api_response.data;
+
+    // Test
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!("/trading/backtest/get?name={}", "testing123")) // Include the query parameter in the URL
+        .header("content-type", "application/json")
+        .body(Body::empty()) // No need to include the id in the body
+        .unwrap();
+
+    let app = create_app().await;
+    let response = app.oneshot(request).await.unwrap();
+    let api_response: ApiResponse<Vec<BacktestData>> = parse_response(response).await.unwrap();
+
+    // Validate
+    assert_eq!(api_response.code, StatusCode::OK);
+
+    // Cleanup
+    let request = Request::builder()
+        .method("DELETE")
+        .uri("/trading/backtest/delete")
+        .header("content-type", "application/json")
+        .body(Body::from(id.to_string()))
+        .unwrap();
+
+    let app = create_app().await;
+    let _ = app.oneshot(request).await.unwrap();
+
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn test_backtest_get_none() -> Result<()> {
+    // Test
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!("/trading/backtest/get?id={}", 1)) // Include the query parameter in the URL
+        .header("content-type", "application/json")
+        .body(Body::empty()) // No need to include the id in the body
+        .unwrap();
+
+    let app = create_app().await;
+    let response = app.oneshot(request).await.unwrap();
+    let api_response: ApiResponse<String> = parse_response(response).await.unwrap();
+
+    // Validate
+    assert_eq!(api_response.status, "failed");
+
+    Ok(())
+}
+
+#[tokio::test]
+#[serial]
+async fn test_backtest_get_by_name_none() -> Result<()> {
+    // Test
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!("/trading/backtest/get?name={}", "none")) // Include the query parameter in the URL
+        .header("content-type", "application/json")
+        .body(Body::empty()) // No need to include the id in the body
+        .unwrap();
+
+    let app = create_app().await;
+    let response = app.oneshot(request).await.unwrap();
+    let api_response: ApiResponse<String> = parse_response(response).await.unwrap();
+
+    // Validate
+    assert_eq!(api_response.status, "failed");
+
+    Ok(())
+}
