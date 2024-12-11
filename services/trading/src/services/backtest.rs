@@ -79,10 +79,21 @@ pub async fn retrieve_backtest(
 ) -> Result<impl IntoResponse> {
     info!("Handling request to retrieve backtest");
 
-    let id: i32 = params
-        .get("id")
-        .and_then(|id_str| id_str.parse().ok())
-        .ok_or_else(|| Error::GeneralError("Invalid id parameter".into()))?;
+    let id: i32;
+    if let Some(name) = params.get("name") {
+        id = match BacktestData::retrieve_id_query(&pool, name).await {
+            Ok(val) => val,
+            Err(e) => {
+                error!("Failed to retrieve backtest id : {:?}", e);
+                return Err(e.into());
+            }
+        };
+    } else {
+        id = params
+            .get("id")
+            .and_then(|id_str| id_str.parse().ok())
+            .ok_or_else(|| Error::GeneralError("Invalid id parameter".into()))?;
+    }
 
     match retrieve_backtest_related(&pool, id).await {
         Ok(backtest) => {
@@ -156,6 +167,7 @@ mod test {
         // Extract the body as bytes
         let body_bytes = to_bytes(response.into_body()).await.unwrap();
         let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
+        // println!("{:?}", body_text);
 
         // Deserialize the response body to ApiResponse for further assertions
         let api_response: ApiResponse<T> = serde_json::from_str(&body_text).unwrap();
@@ -267,6 +279,53 @@ mod test {
         // Test
         let mut params = HashMap::new();
         params.insert("id".to_string(), number.unwrap().to_string());
+
+        // Test
+        let backtest_data = retrieve_backtest(Extension(pool.clone()), Query(params))
+            .await
+            .unwrap()
+            .into_response();
+
+        // Validate
+        let api_result: ApiResponse<Vec<BacktestData>> = parse_response(backtest_data)
+            .await
+            .expect("Error parsing response");
+
+        assert_eq!(api_result.data[0].parameters, backtest_data_obj.parameters);
+
+        // Cleanup
+        if backtest_id.is_some() {
+            let _ = delete_backtest(Extension(pool.clone()), Json(number.unwrap())).await;
+        }
+    }
+
+    #[sqlx::test]
+    #[serial]
+    async fn test_retrieve_backtest_by_name() {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+
+        // Pull test data
+        let mock_data =
+            fs::read_to_string("tests/data/test_data.backtest.json").expect("Unable to read file");
+        let backtest_data_obj: BacktestData =
+            serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
+
+        let result = create_backtest(Extension(pool.clone()), Json(backtest_data_obj.clone()))
+            .await
+            .unwrap()
+            .into_response();
+
+        let api_result: ApiResponse<i32> = parse_response(result)
+            .await
+            .expect("Error parsing response");
+
+        let number = get_id_from_string(&api_result.message);
+        let backtest_id = number.clone();
+
+        // Test
+        let mut params = HashMap::new();
+        params.insert("name".to_string(), "testing123".to_string());
 
         // Test
         let backtest_data = retrieve_backtest(Extension(pool.clone()), Query(params))

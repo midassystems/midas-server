@@ -21,6 +21,7 @@ pub trait BacktestDataQueries {
     async fn insert_query(&self, tx: &mut Transaction<'_, Postgres>) -> Result<i32>;
     async fn delete_query(tx: &mut Transaction<'_, Postgres>, backtest_id: i32) -> Result<()>;
     async fn retrieve_query(pool: &PgPool, id: i32) -> Result<String>;
+    async fn retrieve_id_query(pool: &PgPool, name: &str) -> Result<i32>;
     async fn retrieve_list_query(pool: &PgPool) -> Result<Vec<(i32, String)>>;
 }
 
@@ -66,6 +67,27 @@ impl BacktestDataQueries for BacktestData {
 
         Ok(())
     }
+
+    async fn retrieve_id_query(pool: &PgPool, name: &str) -> Result<i32> {
+        info!("Retrieving backtest id for name {}", name);
+
+        let result = sqlx::query(
+            r#"
+            SELECT id 
+            FROM backtest 
+            WHERE backtest_name=$1
+            "#,
+        )
+        .bind(name)
+        .fetch_one(pool)
+        .await?;
+
+        let backtest_id: i32 = result.try_get("id")?;
+        info!("Successfully retrieved backtest id: {}", backtest_id);
+
+        Ok(backtest_id)
+    }
+
     async fn retrieve_query(pool: &PgPool, id: i32) -> Result<String> {
         info!("Retrieving backtest name for id {}", id);
 
@@ -830,6 +852,48 @@ mod test {
 
         // Validate
         assert_eq!(result, backtest_data.backtest_name);
+
+        // Cleanup
+        let mut transaction = pool
+            .begin()
+            .await
+            .expect("Error setting up test transaction.");
+        BacktestData::delete_query(&mut transaction, backtest_id)
+            .await
+            .expect("Error on delete.");
+        let _ = transaction.commit().await;
+    }
+
+    #[sqlx::test]
+    #[serial]
+    async fn test_retrieve_backtest_id() {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+        let mut transaction = pool
+            .begin()
+            .await
+            .expect("Error setting up test transaction.");
+
+        // Pull test data
+        let mock_data =
+            fs::read_to_string("tests/data/test_data.backtest.json").expect("Unable to read file");
+        let backtest_data: BacktestData =
+            serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
+
+        // Create backtest
+        let backtest_id = backtest_data
+            .insert_query(&mut transaction)
+            .await
+            .expect("Error on insert.");
+        let _ = transaction.commit().await;
+
+        // Test
+        let id: i32 = BacktestData::retrieve_id_query(&pool, "testing123")
+            .await
+            .expect("Error retrieving parameters.");
+
+        // Validate
+        assert_eq!(id, backtest_id); // backtest_data.backtest_name);
 
         // Cleanup
         let mut transaction = pool
