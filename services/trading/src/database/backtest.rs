@@ -149,8 +149,8 @@ impl ParametersQueries for Parameters {
 
         let query = format!(
             r#"
-            INSERT INTO {} ({}, strategy_name, capital, data_type, schema, train_start, train_end, test_start, test_end, tickers)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            INSERT INTO {} ({}, strategy_name, capital, data_type, schema, "start", "end", tickers)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             "#,
             table_name, id_name
         );
@@ -161,10 +161,8 @@ impl ParametersQueries for Parameters {
             .bind(&self.capital)
             .bind(&self.data_type)
             .bind(&self.schema)
-            .bind(&self.train_start)
-            .bind(&self.train_end)
-            .bind(&self.test_start)
-            .bind(&self.test_end)
+            .bind(&self.start)
+            .bind(&self.end)
             .bind(&self.tickers)
             .execute(tx)
             .await?;
@@ -176,7 +174,7 @@ impl ParametersQueries for Parameters {
 
         let query = format!(
             r#"
-            SELECT strategy_name, capital, schema, data_type, train_start, train_end, test_start, test_end, tickers
+            SELECT strategy_name, capital, schema, data_type, "start", "end", tickers
             FROM {}
             WHERE {} = $1
             "#,

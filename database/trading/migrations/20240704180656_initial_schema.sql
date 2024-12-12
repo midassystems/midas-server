@@ -1,21 +1,19 @@
 -- Backtest Results --
-CREATE TABLE Backtest (
+CREATE TABLE IF NOT EXISTS Backtest (
     id SERIAL PRIMARY KEY,
     backtest_name VARCHAR(255) NOT NULL UNIQUE,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
-CREATE TABLE bt_Parameters (
+CREATE TABLE IF NOT EXISTS bt_Parameters (
     id SERIAL PRIMARY KEY,
     backtest_id INTEGER NOT NULL,
     strategy_name VARCHAR(255) NOT NULL,
     capital BIGINT NOT NULL, 
     schema VARCHAR(10),
     data_type VARCHAR(10) NOT NULL,
-    train_start BIGINT NOT NULL,
-    train_end BIGINT NOT NULL,
-    test_start BIGINT NOT NULL,
-    test_end BIGINT NOT NULL,
+    "start" BIGINT NOT NULL,
+    "end" BIGINT NOT NULL,
     tickers  TEXT[] NOT NULL,
     CONSTRAINT fk_bt_parameters
       FOREIGN KEY(backtest_id) 
@@ -23,7 +21,7 @@ CREATE TABLE bt_Parameters (
         ON DELETE CASCADE
 );
 
-CREATE TABLE bt_StaticStats (
+CREATE TABLE IF NOT EXISTS bt_StaticStats (
   id SERIAL PRIMARY KEY,
   backtest_id INTEGER NOT NULL,
   total_trades INTEGER NOT NULL,
@@ -55,7 +53,7 @@ CREATE TABLE bt_StaticStats (
       ON DELETE CASCADE
 );
 
-CREATE TABLE bt_PeriodTimeseriesStats (
+CREATE TABLE IF NOT EXISTS bt_PeriodTimeseriesStats (
   id SERIAL PRIMARY KEY,
   backtest_id INTEGER NOT NULL,
   timestamp BIGINT,
@@ -69,7 +67,7 @@ CREATE TABLE bt_PeriodTimeseriesStats (
       ON DELETE CASCADE
 );
 
-CREATE TABLE bt_DailyTimeseriesStats (
+CREATE TABLE IF NOT EXISTS bt_DailyTimeseriesStats (
   id SERIAL PRIMARY KEY,
   backtest_id INTEGER NOT NULL,
   timestamp BIGINT,
@@ -83,7 +81,7 @@ CREATE TABLE bt_DailyTimeseriesStats (
       ON DELETE CASCADE
 );
 
-CREATE TABLE bt_Trade (
+CREATE TABLE IF NOT EXISTS bt_Trade (
     id SERIAL PRIMARY KEY,
     backtest_id INTEGER NOT NULL,
     trade_id INTEGER NOT NULL,
@@ -101,7 +99,7 @@ CREATE TABLE bt_Trade (
         ON DELETE CASCADE
 );
 
-CREATE TABLE bt_Signal (
+CREATE TABLE IF NOT EXISTS bt_Signal (
     id SERIAL PRIMARY KEY,
     backtest_id INTEGER NOT NULL,
     timestamp BIGINT NOT NULL,
@@ -111,7 +109,7 @@ CREATE TABLE bt_Signal (
             ON DELETE CASCADE
 );
 
-CREATE TABLE bt_SignalInstructions (
+CREATE TABLE IF NOT EXISTS bt_SignalInstructions (
     id SERIAL PRIMARY KEY,
     backtest_id INTEGER NOT NULL,
     signal_id INTEGER NOT NULL,
@@ -135,22 +133,20 @@ CREATE TABLE bt_SignalInstructions (
 );
 
 -- Live Trading Results --
-CREATE TABLE Live (
+CREATE TABLE IF NOT EXISTS Live (
     id SERIAL PRIMARY KEY,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
-CREATE TABLE lv_Parameters (
+CREATE TABLE IF NOT EXISTS lv_Parameters (
     id SERIAL PRIMARY KEY,
     live_id INTEGER NOT NULL,
     strategy_name VARCHAR(255) NOT NULL,
     capital BIGINT NOT NULL, 
     schema VARCHAR(10),
     data_type VARCHAR(10) NOT NULL,
-    train_start BIGINT NOT NULL,
-    train_end BIGINT NOT NULL,
-    test_start BIGINT NOT NULL,
-    test_end BIGINT NOT NULL,
+    "start" BIGINT NOT NULL,
+    "end" BIGINT NOT NULL,
     tickers  TEXT[] NOT NULL,
     CONSTRAINT fk_lv_parameters
       FOREIGN KEY(live_id) 
@@ -158,7 +154,7 @@ CREATE TABLE lv_Parameters (
         ON DELETE CASCADE
 );
 
-CREATE TABLE lv_Trade (
+CREATE TABLE IF NOT EXISTS lv_Trade (
     id SERIAL PRIMARY KEY,
     live_id INTEGER NOT NULL,
     trade_id INTEGER NOT NULL,
@@ -176,7 +172,7 @@ CREATE TABLE lv_Trade (
         ON DELETE CASCADE
 );
 
-CREATE TABLE lv_Signal (
+CREATE TABLE IF NOT EXISTS lv_Signal (
     id SERIAL PRIMARY KEY,
     live_id INTEGER NOT NULL,
     timestamp BIGINT NOT NULL,
@@ -186,7 +182,7 @@ CREATE TABLE lv_Signal (
             ON DELETE CASCADE
 );
 
-CREATE TABLE lv_SignalInstructions (
+CREATE TABLE IF NOT EXISTS lv_SignalInstructions (
     id SERIAL PRIMARY KEY,
     live_id INTEGER NOT NULL,
     signal_id INTEGER NOT NULL,
@@ -209,7 +205,7 @@ CREATE TABLE lv_SignalInstructions (
         ON DELETE CASCADE
 );
 
-CREATE TABLE lv_AccountSummary (
+CREATE TABLE IF NOT EXISTS lv_AccountSummary (
   id SERIAL PRIMARY KEY,
   live_id INTEGER NOT NULL,
   currency VARCHAR(4) NOT NULL,
