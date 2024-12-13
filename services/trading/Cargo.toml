@@ -28,7 +28,7 @@ futures-util = "0.3"
 futures-core = "0.3.30"
 chrono ="0.4.38"
 bytes = "1.7.1"
-mbn = { git = "https://github.com/anthonyb8/mbn.git", branch = "main" }
+mbn = { git = "https://github.com/midassystems/mbn.git", branch = "main" }
 
 [dev-dependencies]
 actix-rt = "2.4"

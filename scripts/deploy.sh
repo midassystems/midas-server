@@ -32,6 +32,10 @@ fi
 echo "Running Docker Compose deployment for $ENV..."
 
 if [[ "$ENV" == "dev" ]]; then
+	mkdir -p data/processed_data
+	mkdir -p logs
+	mkdir -p postgres/data
+
 	# Development deployment (most basic)
 	if docker compose --env-file .env.dev --profile dev up --build -d; then
 		echo "Docker Compose deployment for development succeeded."
