@@ -39,6 +39,7 @@ self.live_session_data={
           "avg_price": 91.45, 
           "action": "SELL", 
           "trade_value": 948444, 
+          "trade_cost": -522.96,
           "fees": 2.97,
       },
       {
@@ -48,6 +49,7 @@ self.live_session_data={
           "avg_price": 446.25,                                        
           "action": "BUY", 
           "trade_value": 234567, 
+          "trade_cost": -522.96,
           "fees": "2.97"
       }
   ], 

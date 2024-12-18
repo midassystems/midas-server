@@ -227,13 +227,14 @@ impl StaticStatsQueries for StaticStats {
             beginning_equity,
             ending_equity,
             total_return,
+            annualized_return,
             daily_standard_deviation_percentage,
             annual_standard_deviation_percentage,
             max_drawdown_percentage_period,
             max_drawdown_percentage_daily,
             sharpe_ratio,
             sortino_ratio)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
             "#,
         )
         .bind(&backtest_id)
@@ -254,6 +255,7 @@ impl StaticStatsQueries for StaticStats {
         .bind(&self.beginning_equity)
         .bind(&self.ending_equity)
         .bind(&self.total_return)
+        .bind(&self.annualized_return)
         .bind(&self.daily_standard_deviation_percentage)
         .bind(&self.annual_standard_deviation_percentage)
         .bind(&self.max_drawdown_percentage_period)
@@ -285,6 +287,7 @@ impl StaticStatsQueries for StaticStats {
                 beginning_equity,
                 ending_equity,
                 total_return,
+                annualized_return,
                 daily_standard_deviation_percentage,
                 annual_standard_deviation_percentage,
                 max_drawdown_percentage_period,
@@ -408,8 +411,8 @@ impl TradesQueries for Trades {
 
         let query = format!(
             r#"
-            INSERT INTO {} ({}, trade_id, leg_id, timestamp, ticker, quantity, avg_price, trade_value, action, fees)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            INSERT INTO {} ({}, trade_id, leg_id, timestamp, ticker, quantity, avg_price, trade_value, trade_cost, action, fees)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             "#,
             table_name, id_name
         );
@@ -423,6 +426,7 @@ impl TradesQueries for Trades {
             .bind(&self.quantity)
             .bind(&self.avg_price)
             .bind(&self.trade_value)
+            .bind(&self.trade_cost)
             .bind(&self.action)
             .bind(&self.fees)
             .execute(tx)
@@ -435,7 +439,7 @@ impl TradesQueries for Trades {
 
         let query = format!(
             r#"
-            SELECT {}, trade_id, leg_id, timestamp, ticker, quantity, avg_price, trade_value, action, fees
+            SELECT {}, trade_id, leg_id, timestamp, ticker, quantity, avg_price, trade_value, trade_cost, action, fees
             FROM {}
             WHERE {} = $1
             "#,
