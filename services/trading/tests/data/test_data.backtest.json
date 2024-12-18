@@ -27,6 +27,7 @@
     "beginning_equity": 10000000,
     "ending_equity": 10042774,
     "total_return": 4277,
+    "annualized_return": 4277,
     "daily_standard_deviation_percentage": 4261882,
     "annual_standard_deviation_percentage": 67655276,
     "max_drawdown_percentage_period": -13609,
@@ -83,6 +84,7 @@
       "quantity": 4,
       "avg_price": 13074,
       "trade_value": -52296,
+      "trade_cost": -52296,
       "action": "BUY",
       "fees": 0
     }

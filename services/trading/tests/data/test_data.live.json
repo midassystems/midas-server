@@ -17,6 +17,7 @@
       "quantity": 4,
       "avg_price": 13074,
       "trade_value": -52296,
+      "trade_cost": -52296,
       "action": "BUY",
       "fees": 0
     }

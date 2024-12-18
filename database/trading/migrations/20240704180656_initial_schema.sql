@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS bt_StaticStats (
   beginning_equity BIGINT NOT NULL,  
   ending_equity BIGINT NOT NULL,  
   total_return BIGINT NOT NULL,
+  annualized_return BIGINT NOT NULL,
   daily_standard_deviation_percentage BIGINT NOT NULL,
   annual_standard_deviation_percentage BIGINT NOT NULL,
   max_drawdown_percentage_period BIGINT NOT NULL,
@@ -91,6 +92,7 @@ CREATE TABLE IF NOT EXISTS bt_Trade (
     quantity BIGINT NOT NULL,
     avg_price BIGINT NOT NULL,
     trade_value BIGINT NOT NULL,
+    trade_cost BIGINT NOT NULL,
     action VARCHAR(10) NOT NULL,
     fees BIGINT NOT NULL,
     CONSTRAINT fk_bt_trade
@@ -164,6 +166,7 @@ CREATE TABLE IF NOT EXISTS lv_Trade (
     quantity BIGINT NOT NULL,
     avg_price BIGINT NOT NULL,
     trade_value BIGINT NOT NULL,
+    trade_cost BIGINT NOT NULL,
     action VARCHAR(10) NOT NULL,
     fees BIGINT NOT NULL,
     CONSTRAINT fk_lv_trade
