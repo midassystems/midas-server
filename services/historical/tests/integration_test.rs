@@ -414,7 +414,7 @@ async fn test_instrument_update() -> Result<()> {
 // -- Market Data --
 #[tokio::test]
 #[serial]
-#[ignore]
+// #[ignore]
 async fn test_records_create() -> Result<()> {
     let mut ids: Vec<i32> = Vec::new();
 

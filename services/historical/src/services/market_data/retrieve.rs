@@ -1,5 +1,5 @@
 use crate::database::market_data::read::RetrieveParams;
-use crate::services::market_data::record_retriever::RecordGetter;
+use crate::services::market_data::retriever::RecordGetter;
 use crate::Result;
 use axum::response::IntoResponse;
 use axum::{body::StreamBody, Extension, Json};
