@@ -5,8 +5,11 @@ use axum::{
     http::{Request, StatusCode},
 };
 use hyper::body::to_bytes;
+use hyper::body::HttpBody as _;
 use mbn::backtest::BacktestData;
+use mbn::backtest_encode::BacktestEncoder;
 use serde::de::DeserializeOwned;
+use serde_json::json;
 use serial_test::serial;
 use std::convert::Infallible;
 use std::fs;
@@ -44,21 +47,49 @@ async fn test_backtest_create() -> Result<()> {
     let mock_data =
         fs::read_to_string("tests/data/test_data.backtest.json").expect("Unable to read file");
 
+    let backtest_data: BacktestData =
+        serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
+
+    // Encode
+    let mut bytes = Vec::new();
+    let mut encoder = BacktestEncoder::new(&mut bytes);
+    encoder.encode_metadata(&backtest_data.metadata);
+    encoder.encode_timeseries(&backtest_data.period_timeseries_stats);
+    encoder.encode_timeseries(&backtest_data.daily_timeseries_stats);
+    encoder.encode_trades(&backtest_data.trades);
+    encoder.encode_signals(&backtest_data.signals);
+
     // Test
+    let json_body = json!(bytes);
     let request = Request::builder()
         .method("POST")
         .uri("/trading/backtest/create")
         .header("content-type", "application/json")
-        .body(Body::from(mock_data.to_string()))
+        .body(Body::from(json_body.to_string()))
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
+    let mut body_stream = response.into_body();
 
     // Validate
-    let api_response: ApiResponse<i32> = parse_response(response).await.unwrap();
-    let id = api_response.data;
+    let mut responses = Vec::new();
+    while let Some(chunk) = body_stream.data().await {
+        match chunk {
+            Ok(bytes) => {
+                let bytes_str = String::from_utf8_lossy(&bytes);
+                let api_response: ApiResponse<String> =
+                    serde_json::from_str::<ApiResponse<String>>(&bytes_str)?;
+                responses.push(api_response);
+            }
+            Err(e) => {
+                panic!("Error while reading stream: {:?}", e);
+            }
+        }
+    }
+    let last_response = &responses[responses.len() - 1];
+    let id: i32 = last_response.data.parse().unwrap();
     assert!(id > 0);
-    assert_eq!(api_response.code, StatusCode::OK);
+    assert_eq!(last_response.code, StatusCode::OK);
 
     // Cleanup
     let request = Request::builder()
@@ -83,17 +114,47 @@ async fn test_backtest_get() -> Result<()> {
     // Mock Data
     let mock_data =
         fs::read_to_string("tests/data/test_data.backtest.json").expect("Unable to read file");
+    let backtest_data: BacktestData =
+        serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
+    // Encode
+    let mut bytes = Vec::new();
+    let mut encoder = BacktestEncoder::new(&mut bytes);
+    encoder.encode_metadata(&backtest_data.metadata);
+    encoder.encode_timeseries(&backtest_data.period_timeseries_stats);
+    encoder.encode_timeseries(&backtest_data.daily_timeseries_stats);
+    encoder.encode_trades(&backtest_data.trades);
+    encoder.encode_signals(&backtest_data.signals);
+
+    // Test
+    let json_body = json!(bytes);
     let request = Request::builder()
         .method("POST")
         .uri("/trading/backtest/create")
         .header("content-type", "application/json")
-        .body(Body::from(mock_data.to_string()))
+        .body(Body::from(json_body.to_string()))
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    let api_response: ApiResponse<i32> = parse_response(response).await.unwrap();
-    let id = api_response.data;
+    let mut body_stream = response.into_body();
+
+    // Validate
+    let mut responses = Vec::new();
+    while let Some(chunk) = body_stream.data().await {
+        match chunk {
+            Ok(bytes) => {
+                let bytes_str = String::from_utf8_lossy(&bytes);
+                let api_response: ApiResponse<String> =
+                    serde_json::from_str::<ApiResponse<String>>(&bytes_str)?;
+                responses.push(api_response);
+            }
+            Err(e) => {
+                panic!("Error while reading stream: {:?}", e);
+            }
+        }
+    }
+    let last_response = &responses[responses.len() - 1];
+    let id: i32 = last_response.data.parse().unwrap();
 
     // Test
     let request = Request::builder()
@@ -134,16 +195,47 @@ async fn test_backtest_get_by_name() -> Result<()> {
     let mock_data =
         fs::read_to_string("tests/data/test_data.backtest.json").expect("Unable to read file");
 
+    let backtest_data: BacktestData =
+        serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
+
+    // Encode
+    let mut bytes = Vec::new();
+    let mut encoder = BacktestEncoder::new(&mut bytes);
+    encoder.encode_metadata(&backtest_data.metadata);
+    encoder.encode_timeseries(&backtest_data.period_timeseries_stats);
+    encoder.encode_timeseries(&backtest_data.daily_timeseries_stats);
+    encoder.encode_trades(&backtest_data.trades);
+    encoder.encode_signals(&backtest_data.signals);
+
+    // Test
+    let json_body = json!(bytes);
     let request = Request::builder()
         .method("POST")
         .uri("/trading/backtest/create")
         .header("content-type", "application/json")
-        .body(Body::from(mock_data.to_string()))
+        .body(Body::from(json_body.to_string()))
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    let api_response: ApiResponse<i32> = parse_response(response).await.unwrap();
-    let id = api_response.data;
+    let mut body_stream = response.into_body();
+
+    // Validate
+    let mut responses = Vec::new();
+    while let Some(chunk) = body_stream.data().await {
+        match chunk {
+            Ok(bytes) => {
+                let bytes_str = String::from_utf8_lossy(&bytes);
+                let api_response: ApiResponse<String> =
+                    serde_json::from_str::<ApiResponse<String>>(&bytes_str)?;
+                responses.push(api_response);
+            }
+            Err(e) => {
+                panic!("Error while reading stream: {:?}", e);
+            }
+        }
+    }
+    let last_response = &responses[responses.len() - 1];
+    let id: i32 = last_response.data.parse().unwrap();
 
     // Test
     let request = Request::builder()

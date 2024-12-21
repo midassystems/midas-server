@@ -1,18 +1,24 @@
+pub mod loader;
+pub mod retriever;
+
 use super::utils::start_transaction;
-use crate::database::backtest::{
-    create_backtest_related, retrieve_backtest_related, BacktestDataQueries,
-};
+use crate::database::backtest::BacktestDataQueries;
 use crate::error::Result;
 use crate::response::ApiResponse;
 use crate::Error;
+use axum::body::StreamBody;
 use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::{Extension, Json, Router};
+use loader::BacktestLoader;
 use mbn::backtest::BacktestData;
+use mbn::backtest_decoder::BacktestDecoder;
+use retriever::BacktestRetriever;
 use sqlx::PgPool;
 use std::collections::hash_map::HashMap;
+use std::io::Cursor;
 use tracing::{error, info};
 
 // Service
@@ -27,30 +33,19 @@ pub fn backtest_service() -> Router {
 // Handlers
 pub async fn create_backtest(
     Extension(pool): Extension<PgPool>,
-    Json(backtest_data): Json<BacktestData>,
+    Json(encoded_data): Json<Vec<u8>>,
 ) -> Result<impl IntoResponse> {
-    info!("Handling request to create backtest");
+    info!("Handling request to create backtest from binary data");
 
-    let mut transaction = start_transaction(&pool).await?;
+    // Decode received binary data
+    let cursor = Cursor::new(encoded_data);
+    let decoder = BacktestDecoder::new(cursor);
 
-    match create_backtest_related(&mut transaction, &backtest_data).await {
-        Ok(id) => {
-            let _ = transaction.commit().await;
+    // Initialize the loader
+    let loader = BacktestLoader::new(pool).await?;
+    let progress_stream = loader.process_stream(decoder).await;
 
-            info!("Successfully created backtest with id {}", id);
-            Ok(ApiResponse::new(
-                "success",
-                &format!("Successfully created backtest with id {}", id),
-                StatusCode::OK,
-                id,
-            ))
-        }
-        Err(e) => {
-            error!("Failed to create backtest: {:?}", e);
-            let _ = transaction.rollback().await;
-            Err(e.into())
-        }
-    }
+    Ok(StreamBody::new(progress_stream))
 }
 
 pub async fn list_backtest(Extension(pool): Extension<PgPool>) -> Result<impl IntoResponse> {
@@ -94,8 +89,9 @@ pub async fn retrieve_backtest(
             .and_then(|id_str| id_str.parse().ok())
             .ok_or_else(|| Error::GeneralError("Invalid id parameter".into()))?;
     }
+    let retriever = BacktestRetriever::new(pool, id);
 
-    match retrieve_backtest_related(&pool, id).await {
+    match retriever.retrieve_backtest().await {
         Ok(backtest) => {
             info!("Successfully retrieved backtest with id {}", id);
             Ok(ApiResponse::new(
@@ -144,22 +140,11 @@ mod test {
     use super::*;
     use crate::database::init::init_db;
     use hyper::body::to_bytes;
-    use regex::Regex;
+    use hyper::body::HttpBody as _;
+    use mbn::backtest_encode::BacktestEncoder;
     use serde::de::DeserializeOwned;
     use serial_test::serial;
     use std::fs;
-
-    fn get_id_from_string(message: &str) -> Option<i32> {
-        let re = Regex::new(r"\d+$").unwrap();
-
-        if let Some(captures) = re.captures(message) {
-            if let Some(matched) = captures.get(0) {
-                let number: i32 = matched.as_str().parse().unwrap();
-                return Some(number);
-            }
-        }
-        None
-    }
 
     async fn parse_response<T: DeserializeOwned>(
         response: axum::response::Response,
@@ -167,7 +152,6 @@ mod test {
         // Extract the body as bytes
         let body_bytes = to_bytes(response.into_body()).await.unwrap();
         let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
-        // println!("{:?}", body_text);
 
         // Deserialize the response body to ApiResponse for further assertions
         let api_response: ApiResponse<T> = serde_json::from_str(&body_text).unwrap();
@@ -186,31 +170,65 @@ mod test {
         let backtest_data: BacktestData =
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
+        // Encode
+        let mut bytes = Vec::new();
+        let mut encoder = BacktestEncoder::new(&mut bytes);
+        encoder.encode_metadata(&backtest_data.metadata);
+        encoder.encode_timeseries(&backtest_data.period_timeseries_stats);
+        encoder.encode_timeseries(&backtest_data.daily_timeseries_stats);
+        encoder.encode_trades(&backtest_data.trades);
+        encoder.encode_signals(&backtest_data.signals);
+
         // Test
-        let result = create_backtest(Extension(pool.clone()), Json(backtest_data))
+        let result = create_backtest(Extension(pool.clone()), Json(bytes))
             .await
             .unwrap()
             .into_response();
 
         // Validate
-        let api_result: ApiResponse<i32> = parse_response(result)
-            .await
-            .expect("Error parsing response");
+        let mut stream = result.into_body();
 
-        assert_eq!(api_result.code, StatusCode::OK);
-        assert!(api_result
-            .message
-            .contains("Successfully created backtest with id"));
+        // Vectors to store success and error responses
+        let mut success_responses = Vec::new();
+        let mut error_responses = Vec::new();
+
+        // Collect streamed responses
+        while let Some(chunk) = stream.data().await {
+            match chunk {
+                Ok(bytes) => {
+                    let bytes_str = String::from_utf8_lossy(&bytes);
+
+                    match serde_json::from_str::<ApiResponse<String>>(&bytes_str) {
+                        Ok(response) => {
+                            if response.status == "success" {
+                                success_responses.push(response); // Store success response
+                            } else {
+                                error_responses.push(response); // Store error response
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to parse chunk: {:?}, raw chunk: {}", e, bytes_str);
+                        }
+                    }
+                }
+                Err(e) => {
+                    panic!("Error while reading chunk: {:?}", e);
+                }
+            }
+        }
+
+        // Validate
+        assert!(success_responses.len() > 0);
+        assert!(error_responses.len() == 0);
 
         // Cleanup
-        let number = get_id_from_string(&api_result.message);
-        if number.is_some() {
-            let _ = delete_backtest(Extension(pool.clone()), Json(number.unwrap())).await;
-        }
+        let id: i32 = success_responses[0].data.parse().unwrap();
+        let _ = delete_backtest(Extension(pool.clone()), Json(id)).await;
     }
 
     #[sqlx::test]
     #[serial]
+    // #[ignore]
     async fn test_list_backtest() {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
@@ -221,17 +239,52 @@ mod test {
         let backtest_data: BacktestData =
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
-        let result = create_backtest(Extension(pool.clone()), Json(backtest_data))
+        // Encode
+        let mut bytes = Vec::new();
+        let mut encoder = BacktestEncoder::new(&mut bytes);
+        encoder.encode_metadata(&backtest_data.metadata);
+        encoder.encode_timeseries(&backtest_data.period_timeseries_stats);
+        encoder.encode_timeseries(&backtest_data.daily_timeseries_stats);
+        encoder.encode_trades(&backtest_data.trades);
+        encoder.encode_signals(&backtest_data.signals);
+
+        // Test
+        let result = create_backtest(Extension(pool.clone()), Json(bytes))
             .await
             .unwrap()
             .into_response();
 
-        let api_result: ApiResponse<i32> = parse_response(result)
-            .await
-            .expect("Error parsing response");
+        let mut stream = result.into_body();
 
-        let number = get_id_from_string(&api_result.message);
-        let backtest_id = number.clone();
+        // Vectors to store success and error responses
+        let mut success_responses = Vec::new();
+        let mut error_responses = Vec::new();
+
+        // Collect streamed responses
+        while let Some(chunk) = stream.data().await {
+            match chunk {
+                Ok(bytes) => {
+                    let bytes_str = String::from_utf8_lossy(&bytes);
+
+                    match serde_json::from_str::<ApiResponse<String>>(&bytes_str) {
+                        Ok(response) => {
+                            if response.status == "success" {
+                                success_responses.push(response); // Store success response
+                            } else {
+                                error_responses.push(response); // Store error response
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to parse chunk: {:?}, raw chunk: {}", e, bytes_str);
+                        }
+                    }
+                }
+                Err(e) => {
+                    panic!("Error while reading chunk: {:?}", e);
+                }
+            }
+        }
+        let backtest_id: i32 = success_responses[0].data.parse().unwrap();
 
         // Test
         let backtests = list_backtest(Extension(pool.clone()))
@@ -247,13 +300,12 @@ mod test {
         assert!(api_result.data.len() > 0);
 
         // Cleanup
-        if backtest_id.is_some() {
-            let _ = delete_backtest(Extension(pool.clone()), Json(number.unwrap())).await;
-        }
+        let _ = delete_backtest(Extension(pool.clone()), Json(backtest_id)).await;
     }
 
     #[sqlx::test]
     #[serial]
+    // #[ignore]
     async fn test_retrieve_backtest() {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
@@ -261,46 +313,80 @@ mod test {
         // Pull test data
         let mock_data =
             fs::read_to_string("tests/data/test_data.backtest.json").expect("Unable to read file");
-        let backtest_data_obj: BacktestData =
+        let mut backtest_data: BacktestData =
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
-        let result = create_backtest(Extension(pool.clone()), Json(backtest_data_obj.clone()))
+        // Encode
+        let mut bytes = Vec::new();
+        let mut encoder = BacktestEncoder::new(&mut bytes);
+        encoder.encode_metadata(&backtest_data.metadata);
+        encoder.encode_timeseries(&backtest_data.period_timeseries_stats);
+        encoder.encode_timeseries(&backtest_data.daily_timeseries_stats);
+        encoder.encode_trades(&backtest_data.trades);
+        encoder.encode_signals(&backtest_data.signals);
+
+        // Test
+        let result = create_backtest(Extension(pool.clone()), Json(bytes))
             .await
             .unwrap()
             .into_response();
 
-        let api_result: ApiResponse<i32> = parse_response(result)
-            .await
-            .expect("Error parsing response");
+        let mut stream = result.into_body();
 
-        let number = get_id_from_string(&api_result.message);
-        let backtest_id = number.clone();
+        // Vectors to store success and error responses
+        let mut success_responses = Vec::new();
+        let mut error_responses = Vec::new();
+
+        // Collect streamed responses
+        while let Some(chunk) = stream.data().await {
+            match chunk {
+                Ok(bytes) => {
+                    let bytes_str = String::from_utf8_lossy(&bytes);
+
+                    match serde_json::from_str::<ApiResponse<String>>(&bytes_str) {
+                        Ok(response) => {
+                            if response.status == "success" {
+                                success_responses.push(response); // Store success response
+                            } else {
+                                error_responses.push(response); // Store error response
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to parse chunk: {:?}, raw chunk: {}", e, bytes_str);
+                        }
+                    }
+                }
+                Err(e) => {
+                    panic!("Error while reading chunk: {:?}", e);
+                }
+            }
+        }
+        let backtest_id: i32 = success_responses[0].data.parse().unwrap();
 
         // Test
         let mut params = HashMap::new();
-        params.insert("id".to_string(), number.unwrap().to_string());
+        params.insert("id".to_string(), backtest_id.to_string());
 
-        // Test
-        let backtest_data = retrieve_backtest(Extension(pool.clone()), Query(params))
+        let ret_backtest_data = retrieve_backtest(Extension(pool.clone()), Query(params))
             .await
             .unwrap()
             .into_response();
 
         // Validate
-        let api_result: ApiResponse<Vec<BacktestData>> = parse_response(backtest_data)
+        let api_result: ApiResponse<Vec<BacktestData>> = parse_response(ret_backtest_data)
             .await
             .expect("Error parsing response");
 
-        assert_eq!(api_result.data[0].parameters, backtest_data_obj.parameters);
+        backtest_data.metadata.backtest_id = backtest_id as u16;
+        assert_eq!(api_result.data[0], backtest_data);
 
         // Cleanup
-        if backtest_id.is_some() {
-            let _ = delete_backtest(Extension(pool.clone()), Json(number.unwrap())).await;
-        }
+        let _ = delete_backtest(Extension(pool.clone()), Json(backtest_id)).await;
     }
 
     #[sqlx::test]
     #[serial]
+    // #[ignore]
     async fn test_retrieve_backtest_by_name() {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
@@ -308,46 +394,83 @@ mod test {
         // Pull test data
         let mock_data =
             fs::read_to_string("tests/data/test_data.backtest.json").expect("Unable to read file");
-        let backtest_data_obj: BacktestData =
+        let backtest_data: BacktestData =
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
-        let result = create_backtest(Extension(pool.clone()), Json(backtest_data_obj.clone()))
+        // Encode
+        let mut bytes = Vec::new();
+        let mut encoder = BacktestEncoder::new(&mut bytes);
+        encoder.encode_metadata(&backtest_data.metadata);
+        encoder.encode_timeseries(&backtest_data.period_timeseries_stats);
+        encoder.encode_timeseries(&backtest_data.daily_timeseries_stats);
+        encoder.encode_trades(&backtest_data.trades);
+        encoder.encode_signals(&backtest_data.signals);
+
+        // Test
+        let result = create_backtest(Extension(pool.clone()), Json(bytes))
             .await
             .unwrap()
             .into_response();
 
-        let api_result: ApiResponse<i32> = parse_response(result)
-            .await
-            .expect("Error parsing response");
+        let mut stream = result.into_body();
 
-        let number = get_id_from_string(&api_result.message);
-        let backtest_id = number.clone();
+        // Vectors to store success and error responses
+        let mut success_responses = Vec::new();
+        let mut error_responses = Vec::new();
+
+        // Collect streamed responses
+        while let Some(chunk) = stream.data().await {
+            match chunk {
+                Ok(bytes) => {
+                    let bytes_str = String::from_utf8_lossy(&bytes);
+
+                    match serde_json::from_str::<ApiResponse<String>>(&bytes_str) {
+                        Ok(response) => {
+                            if response.status == "success" {
+                                success_responses.push(response); // Store success response
+                            } else {
+                                error_responses.push(response); // Store error response
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to parse chunk: {:?}, raw chunk: {}", e, bytes_str);
+                        }
+                    }
+                }
+                Err(e) => {
+                    panic!("Error while reading chunk: {:?}", e);
+                }
+            }
+        }
+        let backtest_id: i32 = success_responses[0].data.parse().unwrap();
 
         // Test
         let mut params = HashMap::new();
         params.insert("name".to_string(), "testing123".to_string());
 
         // Test
-        let backtest_data = retrieve_backtest(Extension(pool.clone()), Query(params))
+        let ret_backtest_data = retrieve_backtest(Extension(pool.clone()), Query(params))
             .await
             .unwrap()
             .into_response();
 
         // Validate
-        let api_result: ApiResponse<Vec<BacktestData>> = parse_response(backtest_data)
+        let api_result: ApiResponse<Vec<BacktestData>> = parse_response(ret_backtest_data)
             .await
             .expect("Error parsing response");
 
-        assert_eq!(api_result.data[0].parameters, backtest_data_obj.parameters);
+        assert_eq!(
+            api_result.data[0].metadata.parameters,
+            backtest_data.metadata.parameters
+        );
 
         // Cleanup
-        if backtest_id.is_some() {
-            let _ = delete_backtest(Extension(pool.clone()), Json(number.unwrap())).await;
-        }
+        let _ = delete_backtest(Extension(pool.clone()), Json(backtest_id)).await;
     }
 
     #[sqlx::test]
     #[serial]
+    // #[ignore]
     async fn test_delete_backtest() {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
