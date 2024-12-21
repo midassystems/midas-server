@@ -18,39 +18,41 @@ pub fn dynamic_table(backtest_flag: bool, table_name: &str) -> (String, String) 
 
 #[async_trait]
 pub trait BacktestDataQueries {
-    async fn insert_query(&self, tx: &mut Transaction<'_, Postgres>) -> Result<i32>;
     async fn delete_query(tx: &mut Transaction<'_, Postgres>, backtest_id: i32) -> Result<()>;
     async fn retrieve_query(pool: &PgPool, id: i32) -> Result<String>;
     async fn retrieve_id_query(pool: &PgPool, name: &str) -> Result<i32>;
     async fn retrieve_list_query(pool: &PgPool) -> Result<Vec<(i32, String)>>;
 }
 
-#[async_trait]
-impl BacktestDataQueries for BacktestData {
-    async fn insert_query(&self, tx: &mut Transaction<'_, Postgres>) -> Result<i32> {
-        info!(
-            "Inserting backtest data for backtest name: {}",
-            &self.backtest_name
-        );
+pub async fn create_backtest_query(
+    backtest_name: &str,
+    tx: &mut Transaction<'_, Postgres>,
+) -> Result<i32> {
+    info!(
+        "Inserting backtest data for backtest name: {}",
+        backtest_name
+    );
 
-        let backtest_result = sqlx::query(
-            r#"
+    let backtest_result = sqlx::query(
+        r#"
             INSERT INTO Backtest (backtest_name, created_at)
             VALUES ($1, NOW())
             RETURNING id
             "#,
-        )
-        .bind(&self.backtest_name)
-        .fetch_one(tx)
-        .await?;
+    )
+    .bind(backtest_name)
+    .fetch_one(tx)
+    .await?;
 
-        // Extract the id directly from the row
-        let id: i32 = backtest_result.try_get("id")?;
-        info!("Successfully inserted backtest with id {}", id);
+    // Extract the id directly from the row
+    let id: i32 = backtest_result.try_get("id")?;
+    info!("Successfully inserted backtest with id {}", id);
 
-        Ok(id)
-    }
+    Ok(id)
+}
 
+#[async_trait]
+impl BacktestDataQueries for BacktestData {
     async fn delete_query(tx: &mut Transaction<'_, Postgres>, backtest_id: i32) -> Result<()> {
         info!("Deleting backtest with id {}", backtest_id);
 
@@ -306,6 +308,7 @@ impl StaticStatsQueries for StaticStats {
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum TimeseriesTypes {
     DAILY,
     PERIOD,
@@ -446,13 +449,6 @@ impl TradesQueries for Trades {
             id_name, table_name, id_name
         );
 
-        // let result : Vec<Trades> = sqlx::query_as(
-        //     r#"
-        //     SELECT backtest_id, trade_id, leg_id, timestamp, ticker, quantity, avg_price, trade_value, action, fees
-        //     FROM bt_Trade
-        //     WHERE backtest_id = $1
-        //     "#
-        // )
         let result: Vec<Trades> = sqlx::query_as(&query).bind(id).fetch_all(pool).await?;
 
         Ok(result)
@@ -497,12 +493,6 @@ impl SignalInstructionsQueries for SignalInstructions {
             table_name, id_name
         );
 
-        // sqlx::query(
-        //     r#"
-        //     INSERT INTO bt_SignalInstructions (backtest_id, signal_id, ticker, order_type, action, trade_id, leg_id, weight, quantity, limit_price, aux_price)
-        //     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        //     "#
-        // )
         sqlx::query(&query)
             .bind(&id)
             .bind(&signal_id)
@@ -538,13 +528,6 @@ impl SignalInstructionsQueries for SignalInstructions {
             table_name, id_name
         );
 
-        // let result : Vec<SignalInstructions> = sqlx::query_as(
-        //     r#"
-        //     SELECT ticker, order_type, action, trade_id, leg_id, weight, quantity, limit_price, aux_price
-        //     FROM bt_SignalInstructions
-        //     WHERE backtest_id = $1 AND signal_id = $2
-        //     "#
-        // )
         let result: Vec<SignalInstructions> = sqlx::query_as(&query)
             .bind(id)
             .bind(signal_id)
@@ -587,13 +570,6 @@ impl SignalQueries for Signals {
             table_name, id_name
         );
 
-        // let result = sqlx::query(
-        //     r#"
-        //     INSERT INTO bt_Signal (backtest_id, timestamp)
-        //     VALUES ($1, $2)
-        //     RETURNING id
-        //     "#,
-        // )
         let result = sqlx::query(&query)
             .bind(&id)
             .bind(&self.timestamp)
@@ -638,115 +614,6 @@ impl SignalQueries for Signals {
     }
 }
 
-pub async fn create_backtest_related(
-    tx: &mut Transaction<'_, Postgres>,
-    backtest_data: &BacktestData,
-) -> Result<i32> {
-    info!(
-        "Creating backtest related data for backtest name: {}",
-        backtest_data.backtest_name
-    );
-
-    // Insert into Backtest table
-    let backtest_id = backtest_data.insert_query(tx).await?;
-
-    // Insert Parameters
-    backtest_data
-        .parameters
-        .insert_query(tx, backtest_id, true)
-        .await?;
-    info!(
-        "Successfully inserted parameters for backtest id {}",
-        backtest_id
-    );
-    // Insert StaticStats
-    backtest_data
-        .static_stats
-        .insert_query(tx, backtest_id)
-        .await?;
-    info!(
-        "Successfully inserted static stats for backtest id {}",
-        backtest_id
-    );
-    // Insert Period Timeseries Stats
-    for period_stat in &backtest_data.period_timeseries_stats {
-        period_stat
-            .insert_query(tx, TimeseriesTypes::PERIOD, backtest_id)
-            .await?;
-    }
-    info!(
-        "Successfully inserted period timeseries stats for backtest id {}",
-        backtest_id
-    );
-
-    // Insert Daily Timeseries Stats
-    for daily_stat in &backtest_data.daily_timeseries_stats {
-        daily_stat
-            .insert_query(tx, TimeseriesTypes::DAILY, backtest_id)
-            .await?;
-    }
-    info!(
-        "Successfully inserted daily timeseries stats for backtest id {}",
-        backtest_id
-    );
-
-    // Insert Trade
-    for trade in &backtest_data.trades {
-        trade.insert_query(tx, backtest_id, true).await?;
-    }
-    info!(
-        "Successfully inserted trades for backtest id {}",
-        backtest_id
-    );
-
-    // Insert Signal
-    for signal in &backtest_data.signals {
-        let signal_id = signal.insert_query(tx, backtest_id, true).await.unwrap();
-        for instruction in &signal.trade_instructions {
-            instruction
-                .insert_query(tx, backtest_id, signal_id, true)
-                .await
-                .unwrap();
-        }
-    }
-    info!(
-        "Successfully inserted signals for backtest id {}",
-        backtest_id
-    );
-
-    Ok(backtest_id)
-}
-
-pub async fn retrieve_backtest_related(pool: &PgPool, backtest_id: i32) -> Result<BacktestData> {
-    info!("Retrieving full backtest data for id {}", backtest_id);
-
-    // Retrieve components
-    let backtest_name = BacktestData::retrieve_query(pool, backtest_id).await?;
-    let parameters = Parameters::retrieve_query(pool, backtest_id, true).await?;
-    let static_stats = StaticStats::retrieve_query(pool, backtest_id).await?;
-    let period_timeseries_stats =
-        TimeseriesStats::retrieve_query(pool, TimeseriesTypes::PERIOD, backtest_id).await?;
-    let daily_timeseries_stats =
-        TimeseriesStats::retrieve_query(pool, TimeseriesTypes::DAILY, backtest_id).await?;
-    let trades = Trades::retrieve_query(pool, backtest_id, true).await?;
-    let signals = Signals::retrieve_query(pool, backtest_id, true).await?;
-    info!(
-        "Successfully retrieved all related data for backtest id {}",
-        backtest_id
-    );
-
-    Ok(BacktestData {
-        backtest_id: Some(backtest_id as u16),
-        backtest_name,
-        parameters,
-        static_stats,
-        period_timeseries_stats,
-        daily_timeseries_stats,
-        trades,
-        signals,
-    })
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
@@ -771,8 +638,8 @@ mod test {
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
         // Test
-        let backtest_id = backtest_data
-            .insert_query(&mut transaction)
+        let backtest_name = backtest_data.metadata.backtest_name;
+        let backtest_id = create_backtest_query(&backtest_name, &mut transaction)
             .await
             .expect("Error on insert.");
 
@@ -799,8 +666,8 @@ mod test {
         let backtest_data: BacktestData =
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
-        let backtest_id = backtest_data
-            .insert_query(&mut transaction)
+        let backtest_name = backtest_data.metadata.backtest_name;
+        let backtest_id = create_backtest_query(&backtest_name, &mut transaction)
             .await
             .expect("Error on insert.");
         let _ = transaction.commit().await;
@@ -841,8 +708,8 @@ mod test {
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
         // Create backtest
-        let backtest_id = backtest_data
-            .insert_query(&mut transaction)
+        let backtest_name = backtest_data.metadata.backtest_name.clone();
+        let backtest_id = create_backtest_query(&backtest_name, &mut transaction)
             .await
             .expect("Error on insert.");
         let _ = transaction.commit().await;
@@ -853,7 +720,7 @@ mod test {
             .expect("Error retrieving parameters.");
 
         // Validate
-        assert_eq!(result, backtest_data.backtest_name);
+        assert_eq!(result, backtest_data.metadata.backtest_name);
 
         // Cleanup
         let mut transaction = pool
@@ -883,8 +750,8 @@ mod test {
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
         // Create backtest
-        let backtest_id = backtest_data
-            .insert_query(&mut transaction)
+        let backtest_name = backtest_data.metadata.backtest_name;
+        let backtest_id = create_backtest_query(&backtest_name, &mut transaction)
             .await
             .expect("Error on insert.");
         let _ = transaction.commit().await;
@@ -924,13 +791,14 @@ mod test {
         let backtest_data: BacktestData =
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
-        let backtest_id = backtest_data
-            .insert_query(&mut transaction)
+        let backtest_name = backtest_data.metadata.backtest_name;
+        let backtest_id = create_backtest_query(&backtest_name, &mut transaction)
             .await
             .expect("Error on insert.");
 
         // Test
         let result = backtest_data
+            .metadata
             .parameters
             .insert_query(&mut transaction, backtest_id, true)
             .await
@@ -957,12 +825,13 @@ mod test {
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
         // Create
-        let backtest_id = backtest_data
-            .insert_query(&mut transaction)
+        let backtest_name = backtest_data.metadata.backtest_name;
+        let backtest_id = create_backtest_query(&backtest_name, &mut transaction)
             .await
             .expect("Error on insert.");
 
         let _ = backtest_data
+            .metadata
             .parameters
             .insert_query(&mut transaction, backtest_id, true)
             .await
@@ -976,7 +845,10 @@ mod test {
             .expect("Error retrieving parameters.");
 
         // Validate
-        assert_eq!(result.strategy_name, backtest_data.parameters.strategy_name);
+        assert_eq!(
+            result.strategy_name,
+            backtest_data.metadata.parameters.strategy_name
+        );
 
         // Cleanup
         let mut transaction = pool
@@ -1005,13 +877,14 @@ mod test {
         let backtest_data: BacktestData =
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
-        let backtest_id = backtest_data
-            .insert_query(&mut transaction)
+        let backtest_name = backtest_data.metadata.backtest_name;
+        let backtest_id = create_backtest_query(&backtest_name, &mut transaction)
             .await
             .expect("Error on insert.");
 
         // Test
         let result = backtest_data
+            .metadata
             .static_stats
             .insert_query(&mut transaction, backtest_id)
             .await
@@ -1038,12 +911,13 @@ mod test {
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
         // Create
-        let backtest_id = backtest_data
-            .insert_query(&mut transaction)
+        let backtest_name = backtest_data.metadata.backtest_name;
+        let backtest_id = create_backtest_query(&backtest_name, &mut transaction)
             .await
             .expect("Error on insert.");
 
         let _ = backtest_data
+            .metadata
             .static_stats
             .insert_query(&mut transaction, backtest_id)
             .await
@@ -1057,7 +931,10 @@ mod test {
             .expect("Error retriving static stats.");
 
         // Validate
-        assert_eq!(result.net_profit, backtest_data.static_stats.net_profit);
+        assert_eq!(
+            result.net_profit,
+            backtest_data.metadata.static_stats.net_profit
+        );
 
         // Cleanup
         let mut transaction = pool
@@ -1086,8 +963,8 @@ mod test {
         let backtest_data: BacktestData =
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
-        let backtest_id = backtest_data
-            .insert_query(&mut transaction)
+        let backtest_name = backtest_data.metadata.backtest_name;
+        let backtest_id = create_backtest_query(&backtest_name, &mut transaction)
             .await
             .expect("Error on insert.");
 
@@ -1120,8 +997,8 @@ mod test {
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
         // Create
-        let backtest_id = backtest_data
-            .insert_query(&mut transaction)
+        let backtest_name = backtest_data.metadata.backtest_name;
+        let backtest_id = create_backtest_query(&backtest_name, &mut transaction)
             .await
             .expect("Error on insert.");
 
@@ -1173,8 +1050,8 @@ mod test {
         let backtest_data: BacktestData =
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
-        let backtest_id = backtest_data
-            .insert_query(&mut transaction)
+        let backtest_name = backtest_data.metadata.backtest_name;
+        let backtest_id = create_backtest_query(&backtest_name, &mut transaction)
             .await
             .expect("Error on insert.");
 
@@ -1207,8 +1084,8 @@ mod test {
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
         // Create
-        let backtest_id = backtest_data
-            .insert_query(&mut transaction)
+        let backtest_name = backtest_data.metadata.backtest_name;
+        let backtest_id = create_backtest_query(&backtest_name, &mut transaction)
             .await
             .expect("Error on insert.");
 
@@ -1260,8 +1137,8 @@ mod test {
         let backtest_data: BacktestData =
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
-        let backtest_id = backtest_data
-            .insert_query(&mut transaction)
+        let backtest_name = backtest_data.metadata.backtest_name;
+        let backtest_id = create_backtest_query(&backtest_name, &mut transaction)
             .await
             .expect("Error on insert.");
 
@@ -1294,8 +1171,8 @@ mod test {
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
         // Create
-        let backtest_id = backtest_data
-            .insert_query(&mut transaction)
+        let backtest_name = backtest_data.metadata.backtest_name;
+        let backtest_id = create_backtest_query(&backtest_name, &mut transaction)
             .await
             .expect("Error on insert.");
 
@@ -1342,8 +1219,8 @@ mod test {
         let backtest_data: BacktestData =
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
-        let backtest_id = backtest_data
-            .insert_query(&mut transaction)
+        let backtest_name = backtest_data.metadata.backtest_name;
+        let backtest_id = create_backtest_query(&backtest_name, &mut transaction)
             .await
             .expect("Error on insert.");
 
@@ -1383,8 +1260,8 @@ mod test {
             serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
 
         // Create
-        let backtest_id = backtest_data
-            .insert_query(&mut transaction)
+        let backtest_name = backtest_data.metadata.backtest_name;
+        let backtest_id = create_backtest_query(&backtest_name, &mut transaction)
             .await
             .expect("Error on insert.");
 
@@ -1404,73 +1281,6 @@ mod test {
 
         // Validate
         assert_eq!(result[0].timestamp, backtest_data.signals[0].timestamp);
-
-        // Cleanup
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-        BacktestData::delete_query(&mut transaction, backtest_id)
-            .await
-            .expect("Error on delete.");
-        let _ = transaction.commit().await;
-    }
-
-    #[sqlx::test]
-    #[serial]
-    async fn test_create_backtest_related() {
-        dotenv::dotenv().ok();
-        let pool = init_db().await.unwrap();
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Pull test data
-        let mock_data =
-            fs::read_to_string("tests/data/test_data.backtest.json").expect("Unable to read file");
-        let backtest_data: BacktestData =
-            serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
-
-        // Test
-        let id = create_backtest_related(&mut transaction, &backtest_data)
-            .await
-            .expect("Error on creating backtest and related.");
-
-        // Validate
-        assert!(id > 0);
-    }
-
-    #[sqlx::test]
-    #[serial]
-    async fn test_retrieve_backtest_related() {
-        dotenv::dotenv().ok();
-        let pool = init_db().await.unwrap();
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Pull test data
-        let mock_data =
-            fs::read_to_string("tests/data/test_data.backtest.json").expect("Unable to read file");
-        let backtest_data: BacktestData =
-            serde_json::from_str(&mock_data).expect("JSON was not well-formatted");
-
-        // Create backtest
-        let backtest_id = create_backtest_related(&mut transaction, &backtest_data)
-            .await
-            .expect("Error on creating backtest and related.");
-
-        let _ = transaction.commit().await;
-
-        // Test
-        let result: BacktestData = retrieve_backtest_related(&pool, backtest_id)
-            .await
-            .expect("Error while retrieving backtest.");
-
-        // Validate
-        assert_eq!(backtest_data.backtest_name, result.backtest_name);
 
         // Cleanup
         let mut transaction = pool
