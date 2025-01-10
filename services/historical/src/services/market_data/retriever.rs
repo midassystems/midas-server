@@ -241,3 +241,96 @@ impl RecordGetter {
         Box::pin(p_stream)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::database::init::init_db;
+    use crate::database::symbols::InstrumentsQueries;
+    use dotenv;
+    use mbn::decode::MetadataDecoder;
+    use mbn::symbols::{Instrument, Vendors};
+    use serial_test::serial;
+
+    pub async fn create_instrument_dummy(ticker: &str) -> Result<i32> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+        let mut transaction = pool.begin().await.expect("Error settign up database.");
+
+        let instrument = Instrument::new(
+            None,
+            ticker,
+            "name",
+            Vendors::Databento,
+            Some("continuous".to_string()),
+            Some("GLBX.MDP3".to_string()),
+            1704672000000000000,
+            1704672000000000000,
+            true,
+        );
+        let id = instrument
+            .insert_instrument(&mut transaction)
+            .await
+            .expect("Error inserting symbol.");
+        let _ = transaction.commit().await;
+
+        Ok(id)
+    }
+
+    #[sqlx::test]
+    #[serial]
+    async fn test_record_getter_process_metadata() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+        let mut ids = Vec::new();
+        let tickers = vec![
+            "ZC.n.0".to_string(),
+            "GF.n.0".to_string(),
+            "LE.n.0".to_string(),
+            "ZS.n.0".to_string(),
+            "ZL.n.0".to_string(),
+            "ZM.n.0".to_string(),
+            "HE.n.0".to_string(),
+            "CL.n.0".to_string(),
+            // "CU.n.0".to_string(),
+        ];
+
+        for ticker in &tickers {
+            let id = create_instrument_dummy(ticker).await?;
+            ids.push(id);
+        }
+
+        // Test
+        let params = RetrieveParams {
+            symbols: tickers,
+            start_ts: 1704209103644092563,
+            end_ts: 1704209903644092569,
+            schema: Schema::Mbp1.to_string(),
+        };
+        let getter = RecordGetter::new(1000, params, pool.clone()).await?;
+        let mut metadata_cursor = getter.process_metadata().await?;
+        metadata_cursor.set_position(0);
+
+        // Validate
+        let mut decoded_metadata = MetadataDecoder::new(metadata_cursor);
+        let metadata = decoded_metadata.decode()?.unwrap();
+        assert_eq!(Schema::Mbp1, metadata.schema);
+        assert_eq!(1704209103644092563, metadata.start);
+        assert_eq!(1704209903644092569, metadata.end);
+        assert_eq!(8, metadata.mappings.map.len());
+
+        // Cleanup
+        for id in ids {
+            let mut transaction = pool
+                .begin()
+                .await
+                .expect("Error setting up test transaction.");
+            Instrument::delete_instrument(&mut transaction, id)
+                .await
+                .expect("Error on delete.");
+            let _ = transaction.commit().await;
+        }
+
+        Ok(())
+    }
+}

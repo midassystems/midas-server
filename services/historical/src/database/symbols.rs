@@ -252,7 +252,17 @@ mod test {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
         let mut ids = Vec::new();
-        let tickers = vec!["AAPL".to_string(), "AAPL1".to_string(), "AAPL2".to_string()];
+        let tickers = vec![
+            "ZC.n.0".to_string(),
+            "GF.n.0".to_string(),
+            "LE.n.0".to_string(),
+            "ZS.n.0".to_string(),
+            "ZL.n.0".to_string(),
+            "ZM.n.0".to_string(),
+            "HE.n.0".to_string(),
+            "CL.n.0".to_string(),
+            "CU.n.0".to_string(),
+        ];
 
         for ticker in &tickers {
             let id = create_instrument_dummy(ticker).await?;
@@ -261,9 +271,10 @@ mod test {
 
         // Test
         let map: SymbolMap = query_symbols_map(&pool, &tickers).await?;
+        println!("{:?}", map);
 
         // Validate
-        assert_eq!(3, map.map.len());
+        assert_eq!(9, map.map.len());
 
         // Cleanup
         for id in ids {
