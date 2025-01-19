@@ -1,26 +1,32 @@
 #!/bin/bash
 
-historical() {
-	export HISTORICAL_DATABASE_URL=postgres://postgres:password@localhost:5432/market_data
-	cargo test -p historical -- --nocapture
+export HISTORICAL_DATABASE_URL=postgres://postgres:password@localhost:5432/market_data
+export INSTRUMENT_DATABASE_URL=postgres://postgres:password@localhost:5432/market_data
+export TRADING_DATABASE_URL=postgres://postgres:password@localhost:5432/trading_data
 
+historical() {
+	cargo test -p historical -- --nocapture
 }
 trading() {
-	export TRADING_DATABASE_URL=postgres://postgres:password@localhost:5432/trading_data
 	cargo test -p trading -- --nocapture
+}
 
+instrument() {
+	cargo test -p instrument -- --nocapture
 }
 
 all() {
 	historical
 	trading
+	instrument
 }
 
 options() {
 	echo "Which tests would you like to run?"
 	echo "1 - Historical Service"
 	echo "2 - Trading Service"
-	echo "3 - All"
+	echo "3 - Instrument Service"
+	echo "4 - All"
 
 }
 
@@ -39,6 +45,10 @@ while true; do
 		break
 		;;
 	3)
+		instrument
+		break
+		;;
+	4)
 		all
 		break
 		;;

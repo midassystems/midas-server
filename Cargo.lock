@@ -874,6 +874,8 @@ dependencies = [
  "base64 0.13.1",
  "bigdecimal",
  "bytes",
+ "databento",
+ "dbn",
  "derive_more",
  "dotenv",
  "futures",
@@ -1156,6 +1158,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "instrument"
+version = "0.1.0"
+dependencies = [
+ "actix-rt",
+ "anyhow",
+ "async-stream",
+ "async-trait",
+ "axum",
+ "axum-test-helper",
+ "base64 0.13.1",
+ "bigdecimal",
+ "bytes",
+ "databento",
+ "dbn",
+ "derive_more",
+ "dotenv",
+ "futures",
+ "futures-core",
+ "futures-util",
+ "hyper 0.14.30",
+ "mbn",
+ "pin-project",
+ "regex",
+ "reqwest 0.11.27",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1256,8 +1296,8 @@ checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
 
 [[package]]
 name = "mbn"
-version = "0.1.0"
-source = "git+https://github.com/midassystems/mbn.git?branch=main#63b99f7d6b6ddaf26ead57459633c1e296f9eb8d"
+version = "1.0.5"
+source = "git+https://github.com/midassystems/mbn.git?branch=main#65ce366039dc4ce1cfa4c37dabd5eb7a955d3bc9"
 dependencies = [
  "bigdecimal",
  "bytemuck",

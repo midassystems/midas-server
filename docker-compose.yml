@@ -47,7 +47,7 @@ services:
   historical-service: 
     build:
       context: .
-      dockerfile: "./services/historical/Dockerfile"
+      dockerfile: "./historical/Dockerfile"
     environment:
       HISTORICAL_DATABASE_URL: ${HISTORICAL_DATABASE_URL} 
       HISTORICAL_PORT: ${HISTORICAL_PORT}
@@ -91,7 +91,7 @@ services:
   trading-service: 
     build:
       context: .
-      dockerfile: "./services/trading/Dockerfile"
+      dockerfile: "./trading/Dockerfile"
     environment:
       TRADING_DATABASE_URL: ${TRADING_DATABASE_URL}
       TRADING_PORT: ${TRADING_PORT}
@@ -109,6 +109,33 @@ services:
       - logs:/app/logs
       - scripts:/app/scripts
     command: ["./midas-trading"]
+    networks:
+      - app-network
+    restart: always
+
+
+  # Actual api service
+  instrument-service: 
+    build:
+      context: .
+      dockerfile: "./instrument/Dockerfile"
+    environment:
+      INSTRUMENT_DATABASE_URL: ${INSTRUMENT_DATABASE_URL}
+      INSTRUMENT_PORT: ${INSTRUMENT_PORT}
+      LOG_FILE: /app/logs/instrument.log
+      LOG_LEVEL: info
+    profiles:
+      - dev
+      - production  # API should run in both dev and production
+    depends_on:
+      - historical-database
+    ports:
+      - "${INSTRUMENT_PORT}:${INSTRUMENT_PORT}"  
+    volumes:
+      - data:/app/data
+      - logs:/app/logs
+      - scripts:/app/scripts
+    command: ["./midas-instrument"]
     networks:
       - app-network
     restart: always
