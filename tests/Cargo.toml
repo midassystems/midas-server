@@ -1,0 +1,31 @@
+[package]
+name = "tests"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dotenv = "0.15"
+tokio = {version ="1.38.1", features = ["full"]}
+reqwest = {version ="0.12.5", features = ["json"]}
+serde = {version="1.0.204"}
+serde_json = "1.0"
+anyhow ="1.0.86"
+thiserror ={version = "1.0.63"}
+derive_more = {version = "1.0.0-beta", features = ["from"]}
+chrono = "0.4"
+futures-util = "0.3"  
+axum = "0.6"
+async-trait = "0.1.83"
+mockito = "1.6.1"
+databento = "0.14.1"
+async-compression = { version = "0.4.11", features = ["tokio", "zstd"] }
+ctor = "0.1"
+mbn = { git = "https://github.com/midassystems/mbn.git", branch =  "main" }
+midas_client = { git = "https://github.com/midassystems/midas-rs.git", branch =  "main" }
+repl-shell = { git = "https://github.com/midassystems/midas-shell.git", branch =  "dev" }
+
+[dev-dependencies]
+serial_test = "3.1.1"
+regex = "1.3.9"
+dbn = "0.22.1"
+databento ="0.14.1"

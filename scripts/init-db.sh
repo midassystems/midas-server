@@ -16,6 +16,3 @@ PGPASSWORD="$POSTGRES_PASSWORD" psql -U "$POSTGRES_USER" -d "postgres" <<-EOSQL
 	    CREATE DATABASE trading_data;
 EOSQL
 echo "Databases created successfully!"
-
-# "$script_dir/migrate-db.sh" market
-# "$script_dir/migrate-db.sh" trading

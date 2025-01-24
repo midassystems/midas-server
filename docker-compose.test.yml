@@ -1,0 +1,61 @@
+services:
+  # PostgreSQL Service for Testing
+  test-postgres:
+    image: postgres:14
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - test_postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh  
+    ports:
+      - "5433:5432"  # Avoid conflicts with production
+    networks:
+      - app-network
+
+  test-migrate-database:
+    build:
+      context: .
+      dockerfile: ./database/Dockerfile
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_HOST: test-postgres
+      HISTORICAL_DATABASE_URL: postgres://postgres:password@test-postgres:5432/market_data
+      TRADING_DATABASE_URL: postgres://postgres:password@test-postgres:5432/trading_data
+    depends_on:
+      - test-postgres 
+    command: >
+      sh -c "/app/scripts/migrate-db.sh historical && 
+             /app/scripts/migrate-db.sh trading
+            "
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  data:
+    driver: local
+    driver_opts:
+      o: bind
+      type: none
+      device: ./data  
+  scripts:
+    driver: local
+    driver_opts:
+      o: bind
+      type: none
+      device: ./scripts
+  test_postgres_data:
+    driver: local
+    driver_opts:
+      o: bind
+      type: none
+      device: ./postgres/test_data  
+
+
+
+

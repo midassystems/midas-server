@@ -63,6 +63,7 @@ async fn test_instrument_create() -> anyhow::Result<()> {
         vendor_data.encode(),
         1704672000000000000,
         1704672000000000001,
+        0,
         true,
     );
     let json = json!(instrument);
@@ -119,6 +120,7 @@ async fn test_instrument_get() -> Result<()> {
         vendor_data.encode(),
         1704672000000000000,
         1704672000000000001,
+        0,
         true,
     );
     let json = json!(instrument);
@@ -191,6 +193,7 @@ async fn test_instrument_update() -> anyhow::Result<()> {
         vendor_data.encode(),
         1704672000000000000,
         1704672000000000001,
+        0,
         true,
     );
     let json = json!(instrument);
@@ -219,6 +222,7 @@ async fn test_instrument_update() -> anyhow::Result<()> {
         vendor_data.encode(),
         1704672000000000000,
         1704672000000000001,
+        0,
         true,
     );
 
@@ -304,6 +308,7 @@ async fn test_instrument_list_dataset() -> anyhow::Result<()> {
         vendor_data.encode(),
         1704672000000000000,
         1704672000000000001,
+        0,
         true,
     );
     let json = json!(instrument);
@@ -331,6 +336,7 @@ async fn test_instrument_list_dataset() -> anyhow::Result<()> {
         vendor_data.encode(),
         1704672000000000000,
         1704672000000000001,
+        0,
         true,
     );
     let json = json!(instrument2);
@@ -405,6 +411,7 @@ async fn test_vendor_list_instruments() -> anyhow::Result<()> {
         vendor_data.encode(),
         1704672000000000000,
         1704672000000000001,
+        0,
         true,
     );
     let json = json!(instrument);
@@ -432,6 +439,7 @@ async fn test_vendor_list_instruments() -> anyhow::Result<()> {
         vendor_data.encode(),
         1704672000000000000,
         1704672000000000001,
+        0,
         true,
     );
     let json = json!(instrument);

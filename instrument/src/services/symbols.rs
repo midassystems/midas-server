@@ -261,6 +261,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -310,6 +311,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
         let result = create_instrument(Extension(pool.clone()), Json(instrument))
@@ -396,6 +398,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
         let id = instrument
@@ -416,6 +419,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -474,6 +478,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
         let id = instrument
@@ -493,6 +498,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
         let id2 = instrument
@@ -566,6 +572,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
         let id = instrument
@@ -585,6 +592,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
         let id2 = instrument

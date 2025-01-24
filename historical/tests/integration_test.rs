@@ -14,7 +14,7 @@ use mbn::symbols::SymbolMap;
 use mbn::vendors::Vendors;
 use mbn::vendors::{DatabentoData, VendorData};
 use mbn::{
-    enums::{Dataset, Schema},
+    enums::{Dataset, Schema, Stype},
     symbols::Instrument,
 };
 use mbn::{
@@ -147,6 +147,7 @@ async fn test_records_create() -> Result<()> {
         vendor_data.encode(),
         1704672000000000000,
         1704672000000000001,
+        0,
         true,
     );
     let id = create_instrument(instrument).await?;
@@ -154,7 +155,7 @@ async fn test_records_create() -> Result<()> {
 
     // Records
     let mbp_1 = Mbp1Msg {
-        hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564) },
+        hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564, 0) },
         price: 6770,
         size: 1,
         action: 1,
@@ -175,7 +176,7 @@ async fn test_records_create() -> Result<()> {
         }],
     };
     let mbp_2 = Mbp1Msg {
-        hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564) },
+        hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564, 0) },
         price: 6870,
         size: 2,
         action: 1,
@@ -279,6 +280,7 @@ async fn test_records_get() -> Result<()> {
         vendor_data.encode(),
         1704672000000000000,
         1704672000000000001,
+        0,
         true,
     );
     let id = create_instrument(instrument).await?;
@@ -286,7 +288,7 @@ async fn test_records_get() -> Result<()> {
 
     // Records
     let mbp_1 = Mbp1Msg {
-        hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564) },
+        hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564, 0) },
         price: 6770,
         size: 1,
         action: 1,
@@ -307,7 +309,7 @@ async fn test_records_get() -> Result<()> {
         }],
     };
     let mbp_2 = Mbp1Msg {
-        hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564) },
+        hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564, 0) },
         price: 6870,
         size: 2,
         action: 1,
@@ -382,6 +384,7 @@ async fn test_records_get() -> Result<()> {
         end_ts: 1704209903644092564,
         schema: Schema::Mbp1,
         dataset: Dataset::Equities,
+        stype: Stype::Raw,
     };
     let json_body = json!(params);
 
@@ -436,6 +439,7 @@ async fn test_records_create_bulk() -> Result<()> {
         vendor_data.encode(),
         1704672000000000000,
         1704672000000000001,
+        0,
         true,
     );
     let id = create_instrument(instrument).await?;
@@ -443,7 +447,7 @@ async fn test_records_create_bulk() -> Result<()> {
 
     // Records
     let mbp_1 = Mbp1Msg {
-        hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564) },
+        hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564, 0) },
         price: 6770,
         size: 1,
         action: 1,
@@ -464,7 +468,7 @@ async fn test_records_create_bulk() -> Result<()> {
         }],
     };
     let mbp_2 = Mbp1Msg {
-        hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564) },
+        hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564, 0) },
         price: 6870,
         size: 2,
         action: 1,
@@ -575,6 +579,7 @@ async fn test_records_create_bulk_duplicate_error() -> Result<()> {
         vendor_data.encode(),
         1704672000000000000,
         1704672000000000001,
+        0,
         true,
     );
     let id = create_instrument(instrument).await?;
@@ -582,7 +587,7 @@ async fn test_records_create_bulk_duplicate_error() -> Result<()> {
 
     // Records
     let mbp_1 = Mbp1Msg {
-        hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564) },
+        hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564, 0) },
         price: 6770,
         size: 1,
         action: 1,
@@ -627,7 +632,7 @@ async fn test_records_create_bulk_duplicate_error() -> Result<()> {
     let _ = encoder.write_to_file(&path, false)?;
 
     // Create JSON body
-    let json_body = json!(file); //"test_bulk_instegration.bin");
+    let json_body = json!(file);
 
     // Test
     let request = Request::builder()

@@ -1,0 +1,10 @@
+[common]
+log_level = "info"
+historical_url = "http://127.0.0.1:8080"
+trading_url = "http://127.0.0.1:8081"
+instrument_url =  "http://127.0.0.1:8082"
+api_key = "your_api_key_here"
+
+
+[vendors]
+databento_key="db-qCxwcf3YCYwertyusiedeptoeyres" # Fake key buy expected to be 32-characters made to look like real key

@@ -434,7 +434,6 @@ mod test {
             dataset: dbn_dataset,
             stype,
         });
-        println!("{:?}", vendor_data.encode());
 
         let dataset = Dataset::Equities;
         let instrument = Instrument::new(
@@ -446,6 +445,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -461,7 +461,7 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
                 price: 6770,
                 size: 1,
                 action: Action::Add as c_char,
@@ -482,7 +482,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Add as c_char,
@@ -547,6 +547,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -561,7 +562,7 @@ mod test {
 
         // Records
         let mbp_1 = Mbp1Msg {
-            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564) },
+            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564, 0) },
             price: 6770,
             size: 1,
             action: 1,
@@ -582,7 +583,7 @@ mod test {
             }],
         };
         let mbp_2 = Mbp1Msg {
-            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092566) },
+            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092566, 0) },
             price: 6870,
             size: 2,
             action: 1,
@@ -658,6 +659,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -673,7 +675,7 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Add as c_char,
@@ -694,7 +696,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Add as c_char,

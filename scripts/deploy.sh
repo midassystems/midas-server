@@ -2,7 +2,7 @@
 
 # Function to display usage
 usage() {
-	echo "Usage: $0 {dev|testing|production}"
+	echo "Usage: $0 {dev|prod}"
 	exit 1
 }
 
@@ -15,7 +15,7 @@ fi
 ENV=$1
 
 # Run the host setup script for testing and production
-if [[ "$ENV" == "testing" || "$ENV" == "production" ]]; then
+if [[ "$ENV" == "prod" ]]; then
 	# Ensure the setup script is executable
 	chmod +x ./scripts/host-setup.sh
 
@@ -37,25 +37,17 @@ if [[ "$ENV" == "dev" ]]; then
 	mkdir -p postgres/data
 
 	# Development deployment (most basic)
-	if docker compose --env-file .env.dev --profile dev up --build -d; then
+	if docker compose --env-file .env --profile dev up --build -d; then
 		echo "Docker Compose deployment for development succeeded."
 	else
 		echo "Docker Compose deployment for development failed."
 		exit 1
 	fi
-
-elif [[ "$ENV" == "testing" ]]; then
-	# Testing deployment
-	if docker compose --env-file .env --profile dev up --build -d; then
-		echo "Docker Compose deployment for testing succeeded."
-	else
-		echo "Docker Compose deployment for testing failed."
-		exit 1
-	fi
-
-elif [[ "$ENV" == "production" ]]; then
+elif [[ "$ENV" == "prod" ]]; then
 	# Production deployment
-	if docker compose --profile production up --build -d; then
+	# if docker compose --env-file .env --profile dev up --build -d; then
+
+	if docker compose --profile prod up --build -d; then
 		echo "Docker Compose deployment for production succeeded."
 	else
 		echo "Docker Compose deployment for production failed."

@@ -2,13 +2,17 @@ use super::{
     equities::{
         EQUITIES_BBO_QUERY, EQUITIES_MBP1_QUERY, EQUITIES_OHLCV_QUERY, EQUITIES_TRADE_QUERY,
     },
-    futures::{FUTURES_BBO_QUERY, FUTURES_MBP1_QUERY, FUTURES_OHLCV_QUERY, FUTURES_TRADE_QUERY},
+    futures::{
+        FUTURES_BBO_CONTINUOUS_QUERY, FUTURES_BBO_QUERY, FUTURES_MBP1_CONTINUOUS_QUERY,
+        FUTURES_MBP1_QUERY, FUTURES_OHLCV_CONTINUOUS_QUERY, FUTURES_OHLCV_QUERY,
+        FUTURES_TRADE_CONTINUOUS_QUERY, FUTURES_TRADE_QUERY,
+    },
     option::{OPTION_BBO_QUERY, OPTION_MBP1_QUERY, OPTION_OHLCV_QUERY, OPTION_TRADE_QUERY},
 };
 use crate::Result;
 use async_trait::async_trait;
 use futures::Stream;
-use mbn::enums::{Dataset, RType, Schema};
+use mbn::enums::{Dataset, RType, Schema, Stype};
 use mbn::params::RetrieveParams;
 use mbn::record_enum::RecordEnum;
 use mbn::records::{BboMsg, Mbp1Msg, OhlcvMsg, TbboMsg, TradeMsg};
@@ -24,29 +28,66 @@ pub enum QueryType {
 }
 
 impl QueryType {
-    fn get_query(self, dataset: Dataset) -> &'static str {
+    fn get_query(self, dataset: Dataset, stype: Stype) -> &'static str {
         match self {
             QueryType::Mbp => match dataset {
-                Dataset::Futures => FUTURES_MBP1_QUERY,
+                Dataset::Futures => match stype {
+                    Stype::Continuous => FUTURES_MBP1_CONTINUOUS_QUERY,
+                    Stype::Raw => FUTURES_MBP1_QUERY,
+                },
                 Dataset::Equities => EQUITIES_MBP1_QUERY,
                 Dataset::Option => OPTION_MBP1_QUERY,
             },
             QueryType::Trade => match dataset {
-                Dataset::Futures => FUTURES_TRADE_QUERY,
+                Dataset::Futures => match stype {
+                    Stype::Continuous => FUTURES_TRADE_CONTINUOUS_QUERY,
+                    Stype::Raw => FUTURES_TRADE_QUERY,
+                },
                 Dataset::Equities => EQUITIES_TRADE_QUERY,
                 Dataset::Option => OPTION_TRADE_QUERY,
             },
             QueryType::Ohlcv => match dataset {
-                Dataset::Futures => FUTURES_OHLCV_QUERY,
+                Dataset::Futures => match stype {
+                    Stype::Continuous => FUTURES_OHLCV_CONTINUOUS_QUERY,
+                    Stype::Raw => FUTURES_OHLCV_QUERY,
+                },
                 Dataset::Equities => EQUITIES_OHLCV_QUERY,
                 Dataset::Option => OPTION_OHLCV_QUERY,
             },
             QueryType::Bbo => match dataset {
-                Dataset::Futures => FUTURES_BBO_QUERY,
+                Dataset::Futures => match stype {
+                    Stype::Continuous => FUTURES_BBO_CONTINUOUS_QUERY,
+                    Stype::Raw => FUTURES_BBO_QUERY,
+                },
                 Dataset::Equities => EQUITIES_BBO_QUERY,
                 Dataset::Option => OPTION_BBO_QUERY,
             },
         }
+    }
+}
+
+pub trait QueryParams {
+    fn symbols_array(&self) -> Vec<String>;
+    fn rank(&self) -> i32;
+}
+
+impl QueryParams for RetrieveParams {
+    fn symbols_array(&self) -> Vec<String> {
+        match self.stype {
+            Stype::Raw => self.symbols.iter().map(|s| s.clone()).collect(),
+            Stype::Continuous => self
+                .symbols
+                .iter()
+                .map(|s| s.split('.').next().unwrap_or(s).to_string() + "%")
+                .collect(),
+        }
+    }
+    fn rank(&self) -> i32 {
+        self.symbols
+            .first()
+            .and_then(|symbol| symbol.split('.').last())
+            .and_then(|rank_str| rank_str.parse::<i32>().ok())
+            .unwrap_or(0) // Default to 0 if any step fails
     }
 }
 
@@ -72,19 +113,23 @@ impl RecordsQuery for Mbp1Msg {
         let _ = params.interval_adjust_ts_start()?;
         let _ = params.interval_adjust_ts_end()?;
         let tbbo_flag = params.schema == Schema::Tbbo;
-        let symbol_array: Vec<String> = params.symbols.iter().map(|s| s.clone()).collect(); // Ownership fix
+        let symbol_array = params.symbols_array();
+        let num_symbols = symbol_array.len() as i32;
+        let rank = params.rank();
 
         info!(
             "Retrieving {:?} records for symbols: {:?} start: {:?} end: {:?} tbbo_flag {:?}",
             params.schema, params.symbols, params.start_ts, params.end_ts, tbbo_flag
         );
 
-        // Query to Cursor
-        let cursor = sqlx::query(QueryType::Mbp.get_query(params.dataset))
+        // Execute continuous query
+        let cursor = sqlx::query(QueryType::Mbp.get_query(params.dataset, params.stype))
             .bind(params.start_ts)
             .bind(params.end_ts - 1)
             .bind(symbol_array)
             .bind(tbbo_flag)
+            .bind(num_symbols)
+            .bind(rank)
             .fetch(pool);
 
         Ok(cursor)
@@ -102,7 +147,9 @@ impl RecordsQuery for TradeMsg {
         // Parameters
         let _ = params.interval_adjust_ts_start()?;
         let _ = params.interval_adjust_ts_end()?;
-        let symbol_array: Vec<String> = params.symbols.iter().map(|s| s.clone()).collect(); // Ownership fix
+        let symbol_array = params.symbols_array();
+        let num_symbols = symbol_array.len() as i32;
+        let rank = params.rank();
 
         info!(
             "Retrieving {:?} records for symbols: {:?} start: {:?} end: {:?} ",
@@ -110,10 +157,12 @@ impl RecordsQuery for TradeMsg {
         );
 
         // Execute the query with parameters, including LIMIT and OFFSET
-        let cursor = sqlx::query(QueryType::Trade.get_query(params.dataset))
+        let cursor = sqlx::query(QueryType::Trade.get_query(params.dataset, params.stype))
             .bind(params.start_ts)
             .bind(params.end_ts - 1)
             .bind(symbol_array)
+            .bind(num_symbols)
+            .bind(rank)
             .fetch(pool);
 
         Ok(cursor)
@@ -132,7 +181,9 @@ impl RecordsQuery for BboMsg {
         let _ = params.interval_adjust_ts_start()?;
         let _ = params.interval_adjust_ts_end()?;
         let interval_ns = params.schema_interval()?;
-        let symbol_array: Vec<String> = params.symbols.iter().map(|s| s.clone()).collect(); // Ownership fix
+        let symbol_array = params.symbols_array();
+        let num_symbols = symbol_array.len() as i32;
+        let rank = params.rank();
 
         info!(
             "Retrieving {:?} records for symbols: {:?} start: {:?} end: {:?} ",
@@ -140,11 +191,13 @@ impl RecordsQuery for BboMsg {
         );
 
         // Construct the SQL query with a join and additional filtering by symbols
-        let cursor = sqlx::query(QueryType::Bbo.get_query(params.dataset))
+        let cursor = sqlx::query(QueryType::Bbo.get_query(params.dataset, params.stype))
             .bind(params.start_ts)
             .bind(params.end_ts)
             .bind(interval_ns)
             .bind(symbol_array)
+            .bind(num_symbols)
+            .bind(rank)
             .fetch(pool);
 
         Ok(cursor)
@@ -163,18 +216,22 @@ impl RecordsQuery for OhlcvMsg {
         let _ = params.interval_adjust_ts_start()?;
         let _ = params.interval_adjust_ts_end()?;
         let interval_ns = params.schema_interval()?;
-        let symbol_array: Vec<String> = params.symbols.iter().map(|s| s.clone()).collect(); // Ownership fix
+        let symbol_array = params.symbols_array();
+        let num_symbols = symbol_array.len() as i32;
+        let rank = params.rank();
 
         info!(
             "Retrieving {:?} records for symbols: {:?} start: {:?} end: {:?} ",
-            params.schema, params.symbols, params.start_ts, params.end_ts
+            params.schema, symbol_array, params.start_ts, params.end_ts
         );
 
-        let cursor = sqlx::query(QueryType::Ohlcv.get_query(params.dataset))
+        let cursor = sqlx::query(QueryType::Ohlcv.get_query(params.dataset, params.stype))
             .bind(params.start_ts)
             .bind(params.end_ts)
             .bind(interval_ns)
             .bind(symbol_array)
+            .bind(num_symbols)
+            .bind(rank)
             .fetch(pool);
 
         Ok(cursor)
@@ -190,7 +247,7 @@ impl RecordsQuery for RecordEnum {
     > {
         match RType::from(params.rtype().unwrap()) {
             RType::Mbp1 => Ok(Mbp1Msg::retrieve_query(pool, params).await?),
-            RType::Trade => Ok(TradeMsg::retrieve_query(pool, params).await?),
+            RType::Trades => Ok(TradeMsg::retrieve_query(pool, params).await?),
             RType::Ohlcv => Ok(OhlcvMsg::retrieve_query(pool, params).await?),
             RType::Bbo => Ok(BboMsg::retrieve_query(pool, params).await?),
             RType::Tbbo => Ok(TbboMsg::retrieve_query(pool, params).await?),
@@ -206,7 +263,7 @@ mod test {
     use crate::database::read::rows::FromRow;
     use dbn;
     use futures::stream::StreamExt;
-    use mbn::enums::{Action, Dataset, Side};
+    use mbn::enums::{Action, Dataset, Side, Stype};
     use mbn::records::{BidAskPair, RecordHeader};
     use mbn::symbols::Instrument;
     use mbn::vendors::Vendors;
@@ -325,6 +382,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -340,7 +398,7 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
                 price: 6770,
                 size: 1,
                 action: Action::Add as c_char,
@@ -361,7 +419,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Add as c_char,
@@ -395,6 +453,7 @@ mod test {
             end_ts: 1704209903644092567,
             schema: Schema::Mbp1,
             dataset: dataset.clone(),
+            stype: Stype::Raw,
         };
 
         let mut cursor = Mbp1Msg::retrieve_query(&pool, query_params)
@@ -406,7 +465,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = Mbp1Msg::from_row(&row)?;
+                    let record = Mbp1Msg::from_row(&row, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Mbp1(record);
@@ -418,7 +477,6 @@ mod test {
                 }
             }
         }
-        println!("{:?}", query);
 
         assert_eq!(records.len(), query.len());
 
@@ -456,6 +514,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -471,7 +530,7 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
                 price: 6770,
                 size: 1,
                 action: Action::Trade as c_char,
@@ -492,7 +551,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Add as c_char,
@@ -526,6 +585,7 @@ mod test {
             end_ts: 1704209903644092567,
             schema: Schema::Tbbo,
             dataset: dataset.clone(),
+            stype: Stype::Raw,
         };
 
         let mut cursor = TbboMsg::retrieve_query(&pool, query_params)
@@ -537,7 +597,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = TbboMsg::from_row(&row)?;
+                    let record = TbboMsg::from_row(&row, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Tbbo(record);
@@ -549,7 +609,6 @@ mod test {
                 }
             }
         }
-        println!("{:?}", query);
 
         assert_eq!(query.len(), 1);
 
@@ -587,6 +646,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -602,7 +662,7 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
                 price: 6770,
                 size: 1,
                 action: Action::Trade as c_char,
@@ -623,7 +683,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Trade as c_char,
@@ -655,8 +715,9 @@ mod test {
             symbols: vec!["AAPL".to_string()],
             start_ts: 1704209103644092563,
             end_ts: 1704209903644092567,
-            schema: Schema::Trade,
+            schema: Schema::Trades,
             dataset,
+            stype: Stype::Raw,
         };
 
         let mut cursor = TradeMsg::retrieve_query(&pool, query_params)
@@ -668,7 +729,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = TradeMsg::from_row(&row)?;
+                    let record = TradeMsg::from_row(&row, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Trade(record);
@@ -680,7 +741,6 @@ mod test {
                 }
             }
         }
-        println!("{:?}", query);
 
         assert!(query.len() == 2);
 
@@ -718,6 +778,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -733,7 +794,7 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
                 price: 6770,
                 size: 1,
                 action: Action::Trade as c_char,
@@ -754,7 +815,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Trade as c_char,
@@ -788,6 +849,7 @@ mod test {
             end_ts: 1704209903644092567,
             schema: Schema::Bbo1S,
             dataset,
+            stype: Stype::Raw,
         };
 
         let mut cursor = BboMsg::retrieve_query(&pool, query_params)
@@ -799,7 +861,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = BboMsg::from_row(&row)?;
+                    let record = BboMsg::from_row(&row, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Bbo(record);
@@ -811,7 +873,6 @@ mod test {
                 }
             }
         }
-        println!("{:?}", query);
         assert!(query.len() > 0);
 
         // Cleanup
@@ -848,6 +909,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -863,7 +925,7 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092562) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092562, 0) },
                 price: 500,
                 size: 1,
                 action: Action::Trade as c_char,
@@ -884,7 +946,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
                 price: 6770,
                 size: 1,
                 action: Action::Trade as c_char,
@@ -906,7 +968,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Trade as c_char,
@@ -941,6 +1003,7 @@ mod test {
             end_ts: 1704295503654092563,
             schema: Schema::Ohlcv1D,
             dataset,
+            stype: Stype::Raw,
         };
 
         let mut cursor = OhlcvMsg::retrieve_query(&pool, query_params)
@@ -952,7 +1015,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = OhlcvMsg::from_row(&row)?;
+                    let record = OhlcvMsg::from_row(&row, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Ohlcv(record);
@@ -964,8 +1027,6 @@ mod test {
                 }
             }
         }
-
-        println!("{:?}", query);
 
         // Validate
         assert!(query.len() > 0);
@@ -1005,6 +1066,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -1020,7 +1082,7 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
                 price: 6770,
                 size: 1,
                 action: Action::Add as c_char,
@@ -1041,7 +1103,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Add as c_char,
@@ -1075,6 +1137,7 @@ mod test {
             end_ts: 1704209903644092567,
             schema: Schema::Mbp1,
             dataset: dataset.clone(),
+            stype: Stype::Raw,
         };
 
         let mut cursor = Mbp1Msg::retrieve_query(&pool, query_params)
@@ -1086,7 +1149,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = Mbp1Msg::from_row(&row)?;
+                    let record = Mbp1Msg::from_row(&row, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Mbp1(record);
@@ -1098,8 +1161,6 @@ mod test {
                 }
             }
         }
-        println!("{:?}", query);
-
         assert_eq!(records.len(), query.len());
 
         // Cleanup
@@ -1136,6 +1197,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -1151,7 +1213,7 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
                 price: 6770,
                 size: 1,
                 action: Action::Trade as c_char,
@@ -1172,7 +1234,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Add as c_char,
@@ -1206,6 +1268,7 @@ mod test {
             end_ts: 1704209903644092567,
             schema: Schema::Tbbo,
             dataset: dataset.clone(),
+            stype: Stype::Raw,
         };
 
         let mut cursor = TbboMsg::retrieve_query(&pool, query_params)
@@ -1217,7 +1280,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = TbboMsg::from_row(&row)?;
+                    let record = TbboMsg::from_row(&row, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Tbbo(record);
@@ -1229,8 +1292,6 @@ mod test {
                 }
             }
         }
-        println!("{:?}", query);
-
         assert_eq!(query.len(), 1);
 
         // Cleanup
@@ -1267,6 +1328,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -1282,7 +1344,7 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
                 price: 6770,
                 size: 1,
                 action: Action::Trade as c_char,
@@ -1303,7 +1365,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Trade as c_char,
@@ -1335,8 +1397,9 @@ mod test {
             symbols: vec!["HEJ4".to_string()],
             start_ts: 1704209103644092563,
             end_ts: 1704209903644092567,
-            schema: Schema::Trade,
+            schema: Schema::Trades,
             dataset,
+            stype: Stype::Raw,
         };
 
         let mut cursor = TradeMsg::retrieve_query(&pool, query_params)
@@ -1348,7 +1411,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = TradeMsg::from_row(&row)?;
+                    let record = TradeMsg::from_row(&row, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Trade(record);
@@ -1360,8 +1423,6 @@ mod test {
                 }
             }
         }
-        println!("{:?}", query);
-
         assert!(query.len() == 2);
 
         // Cleanup
@@ -1398,6 +1459,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -1413,7 +1475,7 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
                 price: 6770,
                 size: 1,
                 action: Action::Trade as c_char,
@@ -1434,7 +1496,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Trade as c_char,
@@ -1468,6 +1530,7 @@ mod test {
             end_ts: 1704209903644092567,
             schema: Schema::Bbo1S,
             dataset,
+            stype: Stype::Raw,
         };
 
         let mut cursor = BboMsg::retrieve_query(&pool, query_params)
@@ -1479,7 +1542,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = BboMsg::from_row(&row)?;
+                    let record = BboMsg::from_row(&row, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Bbo(record);
@@ -1491,7 +1554,6 @@ mod test {
                 }
             }
         }
-        println!("{:?}", query);
         assert!(query.len() > 0);
 
         // Cleanup
@@ -1528,6 +1590,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -1543,7 +1606,7 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092562) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092562, 0) },
                 price: 500,
                 size: 1,
                 action: Action::Trade as c_char,
@@ -1564,7 +1627,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
                 price: 6770,
                 size: 1,
                 action: Action::Trade as c_char,
@@ -1586,7 +1649,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Trade as c_char,
@@ -1621,6 +1684,7 @@ mod test {
             end_ts: 1704295503654092563,
             schema: Schema::Ohlcv1D,
             dataset,
+            stype: Stype::Raw,
         };
 
         let mut cursor = OhlcvMsg::retrieve_query(&pool, query_params)
@@ -1632,7 +1696,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = OhlcvMsg::from_row(&row)?;
+                    let record = OhlcvMsg::from_row(&row, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Ohlcv(record);
@@ -1644,9 +1708,6 @@ mod test {
                 }
             }
         }
-
-        println!("{:?}", query);
-
         // Validate
         assert!(query.len() > 0);
 
@@ -1685,6 +1746,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -1700,7 +1762,7 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
                 price: 6770,
                 size: 1,
                 action: Action::Add as c_char,
@@ -1721,7 +1783,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Add as c_char,
@@ -1755,6 +1817,7 @@ mod test {
             end_ts: 1704209903644092567,
             schema: Schema::Mbp1,
             dataset: dataset.clone(),
+            stype: Stype::Raw,
         };
 
         let mut cursor = Mbp1Msg::retrieve_query(&pool, query_params)
@@ -1766,7 +1829,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = Mbp1Msg::from_row(&row)?;
+                    let record = Mbp1Msg::from_row(&row, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Mbp1(record);
@@ -1778,8 +1841,6 @@ mod test {
                 }
             }
         }
-        println!("{:?}", query);
-
         assert_eq!(records.len(), query.len());
 
         // Cleanup
@@ -1816,6 +1877,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -1831,7 +1893,7 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
                 price: 6770,
                 size: 1,
                 action: Action::Trade as c_char,
@@ -1852,7 +1914,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Add as c_char,
@@ -1886,6 +1948,7 @@ mod test {
             end_ts: 1704209903644092567,
             schema: Schema::Tbbo,
             dataset: dataset.clone(),
+            stype: Stype::Raw,
         };
 
         let mut cursor = TbboMsg::retrieve_query(&pool, query_params)
@@ -1897,7 +1960,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = TbboMsg::from_row(&row)?;
+                    let record = TbboMsg::from_row(&row, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Tbbo(record);
@@ -1909,8 +1972,6 @@ mod test {
                 }
             }
         }
-        println!("{:?}", query);
-
         assert_eq!(query.len(), 1);
 
         // Cleanup
@@ -1947,6 +2008,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -1962,7 +2024,7 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
                 price: 6770,
                 size: 1,
                 action: Action::Trade as c_char,
@@ -1983,7 +2045,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Trade as c_char,
@@ -2015,8 +2077,9 @@ mod test {
             symbols: vec!["APPLP12345".to_string()],
             start_ts: 1704209103644092563,
             end_ts: 1704209903644092567,
-            schema: Schema::Trade,
+            schema: Schema::Trades,
             dataset,
+            stype: Stype::Raw,
         };
 
         let mut cursor = TradeMsg::retrieve_query(&pool, query_params)
@@ -2028,7 +2091,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = TradeMsg::from_row(&row)?;
+                    let record = TradeMsg::from_row(&row, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Trade(record);
@@ -2040,8 +2103,6 @@ mod test {
                 }
             }
         }
-        println!("{:?}", query);
-
         assert!(query.len() == 2);
 
         // Cleanup
@@ -2078,6 +2139,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -2093,7 +2155,7 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
                 price: 6770,
                 size: 1,
                 action: Action::Trade as c_char,
@@ -2114,7 +2176,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Trade as c_char,
@@ -2148,6 +2210,7 @@ mod test {
             end_ts: 1704209903644092567,
             schema: Schema::Bbo1S,
             dataset,
+            stype: Stype::Raw,
         };
 
         let mut cursor = BboMsg::retrieve_query(&pool, query_params)
@@ -2159,7 +2222,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = BboMsg::from_row(&row)?;
+                    let record = BboMsg::from_row(&row, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Bbo(record);
@@ -2171,7 +2234,6 @@ mod test {
                 }
             }
         }
-        println!("{:?}", query);
         assert!(query.len() > 0);
 
         // Cleanup
@@ -2208,6 +2270,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -2223,7 +2286,7 @@ mod test {
         // Mock data
         let records = vec![
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092562) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092562, 0) },
                 price: 500,
                 size: 1,
                 action: Action::Trade as c_char,
@@ -2244,7 +2307,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
                 price: 6770,
                 size: 1,
                 action: Action::Trade as c_char,
@@ -2266,7 +2329,7 @@ mod test {
                 }],
             },
             Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562) },
+                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562, 0) },
                 price: 6870,
                 size: 2,
                 action: Action::Trade as c_char,
@@ -2301,6 +2364,7 @@ mod test {
             end_ts: 1704295503654092563,
             schema: Schema::Ohlcv1D,
             dataset,
+            stype: Stype::Raw,
         };
 
         let mut cursor = OhlcvMsg::retrieve_query(&pool, query_params)
@@ -2312,7 +2376,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = OhlcvMsg::from_row(&row)?;
+                    let record = OhlcvMsg::from_row(&row, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Ohlcv(record);
@@ -2324,8 +2388,6 @@ mod test {
                 }
             }
         }
-
-        println!("{:?}", query);
 
         // Validate
         assert!(query.len() > 0);

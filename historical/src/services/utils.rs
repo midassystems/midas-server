@@ -163,6 +163,7 @@ mod test {
                 vendor_data.encode(),
                 1704672000000000000,
                 1704672000000000000,
+                0,
                 true,
             );
             let id = create_instrument(instrument).await?;
@@ -171,7 +172,6 @@ mod test {
 
         // Test
         let map: SymbolMap = query_symbols_map(&pool, &tickers, dataset).await?;
-        println!("{:?}", map);
 
         // Validate
         assert_eq!(9, map.map.len());
@@ -214,16 +214,15 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
         let id = create_instrument(instrument)
             .await
             .expect("Error creating instrument.");
-        // let id = create_instrument_dummy("AAPL").await?;
         ids.push(id);
-        //
-        // let id = create_instrument_dummy("AAPL1").await?;
+
         // Create instrument
         let dataset = Dataset::Equities;
         let ticker = "AAPL1";
@@ -237,6 +236,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 

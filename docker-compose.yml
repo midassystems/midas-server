@@ -1,16 +1,4 @@
 services:
-  test_host:
-    build:
-      context: ../
-      dockerfile: ./server/Dockerfile
-    profiles:
-      - test-server
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock  # Mount Docker socket
-    privileged: true  # Required for Docker-in-Docker setup
-    command: ["tail", "-f", "/dev/null"]
-    
-  # Single PostgreSQL service hosting both databases
   postgres:
     image: postgres:14
     environment:
@@ -18,7 +6,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     profiles:
       - dev
-      - production  
+      - prod 
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ${SCRIPTS_DIR}/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
@@ -26,24 +14,29 @@ services:
       - app-network
     restart: always
 
-  historical-database:
+  migrate-database:
     build:
       context: .
-      dockerfile: ./database/historical/Dockerfile
+      dockerfile: ./database/Dockerfile
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: ${POSTGRES_HOST}
       HISTORICAL_DATABASE_URL: ${HISTORICAL_DATABASE_URL}
-    depends_on:
-      - postgres  # Wait for the database to be ready
+      TRADING_DATABASE_URL: ${TRADING_DATABASE_URL}
     profiles:
       - dev
-      - production  # API should run in both dev and production
-    command: ["/app/scripts/migrate-db.sh", "historical"]
+      - prod
+    depends_on:
+      - postgres  # Ensure PostgreSQL is ready first
+    command: >
+      sh -c "/app/scripts/migrate-db.sh historical && 
+             /app/scripts/migrate-db.sh trading
+            "
     networks:
       - app-network
 
-  # Actual api service
+  # Historical service
   historical-service: 
     build:
       context: .
@@ -55,9 +48,9 @@ services:
       LOG_LEVEL: info
     profiles:
       - dev
-      - production  # API should run in both dev and production
+      - prod  
     depends_on:
-      - historical-database
+      - migrate-database
     ports:
       - "${HISTORICAL_PORT}:${HISTORICAL_PORT}"  
     volumes:
@@ -69,25 +62,7 @@ services:
       - app-network 
     restart: always
 
-  trading-database:
-    build:
-      context: .
-      dockerfile: ./database/trading/Dockerfile
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      TRADING_DATABASE_URL: ${TRADING_DATABASE_URL}
-    depends_on:
-      - postgres  # Wait for the database to be ready
-    profiles:
-      - dev
-      - production  # API should run in both dev and production
-    command: ["/app/scripts/migrate-db.sh", "trading"]
-    networks:
-      - app-network
-
-
-  # Actual api service
+  # Trading service
   trading-service: 
     build:
       context: .
@@ -99,9 +74,9 @@ services:
       LOG_LEVEL: info
     profiles:
       - dev
-      - production  # API should run in both dev and production
+      - prod  
     depends_on:
-      - trading-database
+      - migrate-database
     ports:
       - "${TRADING_PORT}:${TRADING_PORT}"  
     volumes:
@@ -114,7 +89,7 @@ services:
     restart: always
 
 
-  # Actual api service
+  # Instrument service
   instrument-service: 
     build:
       context: .
@@ -126,9 +101,9 @@ services:
       LOG_LEVEL: info
     profiles:
       - dev
-      - production  # API should run in both dev and production
+      - prod  
     depends_on:
-      - historical-database
+      - migrate-database
     ports:
       - "${INSTRUMENT_PORT}:${INSTRUMENT_PORT}"  
     volumes:
@@ -140,24 +115,6 @@ services:
       - app-network
     restart: always
 
-
-  # # Admin for updating etc 
-  # manager:
-  #   build:
-  #     context: .
-  #     dockerfile: "./cli/Dockerfile"
-  #   environment:
-  #     MIDAS_URL: http://historical-service:${HISTORICAL_PORT}
-  #   profiles:
-  #     - production  
-  #   volumes:
-  #     - data:/app/data
-  #     - ${BIN_DIR}:/usr/local/bin  # Mount host's bin directory
-  #     - ${LIB_DIR}:/usr/local/lib  # Mount host's lib directory
-  #   command: ["./app/scripts/build-manager.sh"]
-  #   networks:
-  #     - app-network
-
 networks:
   app-network:
     driver: bridge
@@ -168,13 +125,13 @@ volumes:
     driver_opts:
       o: bind
       type: none
-      device: ${LOG_DIR}  # Centralized log directory
+      device: ${LOG_DIR} 
   data:
     driver: local
     driver_opts:
       o: bind
       type: none
-      device: ${DATA_DIR}  # Centralized data directory
+      device: ${DATA_DIR}  
   scripts:
     driver: local
     driver_opts:
@@ -186,7 +143,7 @@ volumes:
     driver_opts:
       o: bind
       type: none
-      device: ${POSTGRES_DIR}/data  # Custom directory for Postgres data
+      device: ${POSTGRES_DIR}/data  
 
 
 

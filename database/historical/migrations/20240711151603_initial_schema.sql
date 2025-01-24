@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS futures (
   vendor_data BIGINT NOT NULL,
   last_available BIGINT NOT NULL,
   first_available BIGINT NOT NULL,
+  expiration_date BIGINT,  
   active BOOL NOT NULL,
   CONSTRAINT fk_instrument_futures
     FOREIGN KEY(instrument_id) 
@@ -78,6 +79,7 @@ CREATE TABLE IF NOT EXISTS equities (
   vendor_data BIGINT NOT NULL,
   last_available BIGINT NOT NULL,
   first_available BIGINT NOT NULL,
+  expiration_date BIGINT,  
   active BOOL NOT NULL,
   CONSTRAINT fk_instrument_equities
     FOREIGN KEY(instrument_id) 
@@ -139,6 +141,7 @@ CREATE TABLE IF NOT EXISTS option (
   vendor_data BIGINT NOT NULL,
   last_available BIGINT NOT NULL,
   first_available BIGINT NOT NULL,
+  expiration_date BIGINT,  
   active BOOL NOT NULL,
   CONSTRAINT fk_instrument_option
     FOREIGN KEY(instrument_id) 

@@ -1,0 +1,2 @@
+{"timestamp":"2025-01-23T16:30:13.516615Z","level":"INFO","fields":{"message":"Logging system initialized successfully."},"target":"historical::logger","filename":"src/logger.rs","line_number":40,"threadId":"ThreadId(1)"}
+{"timestamp":"2025-01-23T16:30:29.935747Z","level":"INFO","fields":{"message":"Listening on 0.0.0.0:8080"},"target":"midas_historical","filename":"src/main.rs","line_number":30,"threadId":"ThreadId(1)"}

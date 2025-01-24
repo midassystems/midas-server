@@ -98,7 +98,7 @@ mod test {
     use mbn::vendors::Vendors;
     use mbn::vendors::{DatabentoData, VendorData};
     use mbn::{
-        enums::{Dataset, Schema},
+        enums::{Dataset, Schema, Stype},
         records::{BidAskPair, Mbp1Msg, RecordHeader},
         symbols::Instrument,
     };
@@ -205,6 +205,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -215,7 +216,7 @@ mod test {
 
         // Records
         let mbp_1 = Mbp1Msg {
-            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564) },
+            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564, 0) },
             price: 6770,
             size: 1,
             action: 1,
@@ -237,7 +238,7 @@ mod test {
             }],
         };
         let mbp_2 = Mbp1Msg {
-            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092566) },
+            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092566, 0) },
             price: 6870,
             size: 2,
             action: 1,
@@ -353,6 +354,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -363,7 +365,7 @@ mod test {
 
         // Records
         let mbp_1 = Mbp1Msg {
-            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564) },
+            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564, 0) },
             price: 6770,
             size: 1,
             action: 1,
@@ -385,7 +387,7 @@ mod test {
             }],
         };
         let mbp_2 = Mbp1Msg {
-            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092566) },
+            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092566, 0) },
             price: 6870,
             size: 2,
             action: 1,
@@ -476,6 +478,7 @@ mod test {
             end_ts: 1704209903644092569,
             schema: Schema::Mbp1,
             dataset,
+            stype: Stype::Raw,
         };
         let response = get_records(Extension(pool.clone()), Json(params))
             .await
@@ -535,6 +538,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -545,7 +549,7 @@ mod test {
 
         // Records
         let mbp_1 = Mbp1Msg {
-            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092566) },
+            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092566, 0) },
             price: 6870,
             size: 2,
             action: 1,
@@ -567,7 +571,7 @@ mod test {
         };
 
         let mbp_2 = Mbp1Msg {
-            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092566) },
+            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092566, 0) },
             price: 6870,
             size: 2,
             action: 1,

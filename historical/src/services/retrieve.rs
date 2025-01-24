@@ -47,7 +47,7 @@ mod test {
     use mbn::vendors::{DatabentoData, VendorData};
     use mbn::{
         decode::Decoder,
-        enums::Schema,
+        enums::{Schema, Stype},
         records::{BidAskPair, Mbp1Msg, RecordHeader},
         symbols::Instrument,
     };
@@ -80,8 +80,8 @@ mod test {
 
         let query = format!(
             r#"
-            INSERT INTO {} (instrument_id, ticker, name, vendor, vendor_data, last_available, first_available, active)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO {} (instrument_id, ticker, name, vendor, vendor_data, last_available, first_available, expiration_date, active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING id
             "#,
             instrument.dataset.as_str()
@@ -95,6 +95,7 @@ mod test {
             .bind(instrument.vendor_data as i64)
             .bind(instrument.last_available as i64)
             .bind(instrument.first_available as i64)
+            .bind(instrument.expiration_date as i64)
             .bind(instrument.active)
             .execute(&mut *tx) // Borrow tx mutably
             .await?;
@@ -129,7 +130,176 @@ mod test {
     #[sqlx::test]
     #[serial]
     // #[ignore]
-    async fn test_get_record() -> anyhow::Result<()> {
+    async fn test_get_record_continuous() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+
+        let pool = init_db().await.unwrap();
+        let transaction = pool.begin().await.expect("Error settign up database.");
+
+        // Create instrument
+        let schema = dbn::Schema::from_str("mbp-1")?;
+        let dbn_dataset = dbn::Dataset::from_str("GLBX.MDP3")?;
+        let stype = dbn::SType::from_str("raw_symbol")?;
+        let vendor_data = VendorData::Databento(DatabentoData {
+            schema,
+            dataset: dbn_dataset,
+            stype,
+        });
+
+        let dataset = Dataset::Futures;
+        let ticker = "PPJ4";
+        let name = "test";
+        let instrument = Instrument::new(
+            None,
+            ticker,
+            name,
+            dataset.clone(),
+            Vendors::Databento,
+            vendor_data.encode(),
+            1676397660000000000,
+            1704085200000000000,
+            1707933660000000000,
+            true,
+        );
+
+        let id = create_instrument(instrument)
+            .await
+            .expect("Error creating instrument.");
+        let _ = transaction.commit().await;
+
+        // Records
+        let mbp_1 = Mbp1Msg {
+            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1707930000000000001, 0) },
+            price: 6770,
+            size: 1,
+            action: 84,
+            side: 2,
+            depth: 0,
+            flags: 10,
+            ts_recv: 1707930000000000001,
+            ts_in_delta: 17493,
+            sequence: 739763,
+            discriminator: 0,
+            levels: [BidAskPair {
+                bid_px: 1,
+                ask_px: 1,
+                bid_sz: 1,
+                ask_sz: 1,
+                bid_ct: 10,
+                ask_ct: 20,
+            }],
+        };
+        let mbp_2 = Mbp1Msg {
+            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1707933650000000000, 0) },
+            price: 6870,
+            size: 2,
+            action: 84,
+            side: 1,
+            depth: 0,
+            flags: 0,
+            ts_recv: 1707933650000000000,
+            ts_in_delta: 17493,
+            sequence: 739763,
+            discriminator: 0,
+            levels: [BidAskPair {
+                bid_px: 1,
+                ask_px: 1,
+                bid_sz: 1,
+                ask_sz: 1,
+                bid_ct: 10,
+                ask_ct: 20,
+            }],
+        };
+
+        let record_ref1: RecordRef = (&mbp_1).into();
+        let record_ref2: RecordRef = (&mbp_2).into();
+
+        let metadata = Metadata::new(
+            Schema::Mbp1,
+            dataset,
+            1704209103644092564,
+            1704209103644092566,
+            SymbolMap::new(),
+        );
+
+        let mut buffer = Vec::new();
+        let mut encoder = CombinedEncoder::new(&mut buffer);
+        encoder.encode_metadata(&metadata)?;
+        encoder
+            .encode_records(&[record_ref1, record_ref2])
+            .expect("Encoding failed");
+
+        let response = create_record(Extension(pool.clone()), Json(buffer))
+            .await
+            .expect("Error creating records.")
+            .into_response();
+        let mut stream = response.into_body();
+
+        // Collect streamed responses
+        while let Some(chunk) = stream.data().await {
+            match chunk {
+                Ok(bytes) => {
+                    let bytes_str = String::from_utf8_lossy(&bytes);
+
+                    match serde_json::from_str::<ApiResponse<String>>(&bytes_str) {
+                        Ok(response) => {
+                            // println!("{:?}", response);
+                            if response.status == "success" {}
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to parse chunk: {:?}, raw chunk: {}", e, bytes_str);
+                        }
+                    }
+                }
+                Err(e) => {
+                    panic!("Error while reading chunk: {:?}", e);
+                }
+            }
+        }
+
+        // Test
+        let params = RetrieveParams {
+            symbols: vec!["PP.c.0".to_string()],
+            start_ts: 1672549200000000000,
+            end_ts: 1747242000000000000,
+            schema: Schema::Mbp1,
+            dataset,
+            stype: Stype::Continuous,
+        };
+
+        let response = get_records(Extension(pool.clone()), Json(params))
+            .await
+            .into_response();
+
+        let mut body = response.into_body();
+
+        // Collect streamed response
+        let mut buffer = Vec::new();
+        while let Some(chunk) = body.data().await {
+            match chunk {
+                Ok(bytes) => buffer.extend_from_slice(&bytes),
+                Err(e) => panic!("Error while reading chunk: {:?}", e),
+            }
+        }
+
+        let cursor = Cursor::new(buffer);
+        let mut decoder = Decoder::new(cursor)?;
+        let _decoded_metadata = decoder.metadata().unwrap();
+        let records = decoder.decode()?;
+
+        // Validate
+        assert!(!records.is_empty(), "Streamed data should not be empty");
+
+        // Cleanup
+        delete_instrument(id).await.expect("Error on delete");
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[serial]
+    // #[ignore]
+    async fn test_get_records() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
         let transaction = pool.begin().await.expect("Error settign up database.");
@@ -156,6 +326,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -166,7 +337,7 @@ mod test {
 
         // Records
         let mbp_1 = Mbp1Msg {
-            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564) },
+            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564, 0) },
             price: 6770,
             size: 1,
             action: 1,
@@ -187,7 +358,7 @@ mod test {
             }],
         };
         let mbp_2 = Mbp1Msg {
-            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092565) },
+            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092565, 0) },
             price: 6870,
             size: 2,
             action: 1,
@@ -258,6 +429,7 @@ mod test {
             end_ts: 1704209903644092569,
             schema: Schema::Mbp1,
             dataset,
+            stype: Stype::Raw,
         };
 
         let response = get_records(Extension(pool.clone()), Json(params))
@@ -320,6 +492,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -336,6 +509,7 @@ mod test {
             end_ts: 1704209903644092569,
             schema: Schema::Mbp1,
             dataset,
+            stype: Stype::Raw,
         };
 
         let response = get_records(Extension(pool.clone()), Json(params))
@@ -383,6 +557,7 @@ mod test {
             end_ts: 1704209903644092569,
             schema: Schema::Mbp1,
             dataset: Dataset::Equities,
+            stype: Stype::Raw,
         };
 
         let response = get_records(Extension(pool.clone()), Json(params))

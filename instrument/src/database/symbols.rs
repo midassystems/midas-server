@@ -31,6 +31,10 @@ impl FromRow for Instrument {
                 .try_get::<i64, _>("first_available")?
                 .try_into()
                 .unwrap(),
+            expiration_date: row
+                .try_get::<i64, _>("expiration_date")?
+                .try_into()
+                .unwrap_or(0) as u64,
             active: row.try_get::<bool, _>("active")?,
         })
     }
@@ -65,8 +69,8 @@ impl InstrumentsQueries for Instrument {
 
         let query = format!(
             r#"
-            INSERT INTO {} (instrument_id, ticker, name, vendor, vendor_data,  last_available, first_available, active)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO {} (instrument_id, ticker, name, vendor, vendor_data,  last_available, first_available, expiration_date, active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING id
             "#,
             self.dataset.as_str()
@@ -80,6 +84,7 @@ impl InstrumentsQueries for Instrument {
             .bind(self.vendor_data as i64)
             .bind(self.last_available as i64)
             .bind(self.first_available as i64)
+            .bind(self.expiration_date as i64)
             .bind(self.active)
             .execute(&mut *tx) // Borrow tx mutably
             .await?;
@@ -313,6 +318,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
         let id = instrument
@@ -353,6 +359,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -395,6 +402,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
         let id = instrument
@@ -451,6 +459,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
 
@@ -509,6 +518,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000000,
             1704672000000000000,
+            0,
             true,
         );
         let id = instrument
@@ -529,6 +539,7 @@ mod test {
             vendor_data.encode(),
             1704672000000000001,
             1704672000000000000,
+            0,
             true,
         );
         let mut transaction = pool.begin().await.expect("Error settign up database.");

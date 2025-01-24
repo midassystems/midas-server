@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "historical", 
   "instrument", 
+  "tests", 
   "trading",
 ]
 
