@@ -34,7 +34,7 @@ impl FromRow for Instrument {
             expiration_date: row
                 .try_get::<i64, _>("expiration_date")?
                 .try_into()
-                .unwrap_or(0) as u64,
+                .unwrap(),
             active: row.try_get::<bool, _>("active")?,
         })
     }
@@ -159,8 +159,8 @@ impl InstrumentsQueries for Instrument {
         let query = format!(
             r#"
             UPDATE {}
-            SET ticker=$1, name=$2, vendor=$3, vendor_data=$4, last_available=$5, first_available=$6, active=$7 
-            WHERE instrument_id = $8
+            SET ticker=$1, name=$2, vendor=$3, vendor_data=$4, last_available=$5, first_available=$6, expiration_date=$7, active=$8 
+            WHERE instrument_id = $9
             "#,
             self.dataset.as_str()
         );
@@ -172,6 +172,7 @@ impl InstrumentsQueries for Instrument {
             .bind(self.vendor_data as i64)
             .bind(self.last_available as i64)
             .bind(self.first_available as i64)
+            .bind(self.expiration_date as i64)
             .bind(self.active)
             .bind(id as i32)
             .execute(&mut *tx) // Borrow tx mutably
