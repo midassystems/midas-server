@@ -114,8 +114,8 @@ impl RecordsQuery for Mbp1Msg {
         let _ = params.interval_adjust_ts_end()?;
         let tbbo_flag = params.schema == Schema::Tbbo;
         let symbol_array = params.symbols_array();
-        let num_symbols = symbol_array.len() as i32;
         let rank = params.rank();
+        // let num_symbols = symbol_array.len() as i32;
 
         info!(
             "Retrieving {:?} records for symbols: {:?} start: {:?} end: {:?} tbbo_flag {:?}",
@@ -128,9 +128,9 @@ impl RecordsQuery for Mbp1Msg {
             .bind(params.end_ts - 1)
             .bind(symbol_array)
             .bind(tbbo_flag)
-            .bind(num_symbols)
             .bind(rank)
             .fetch(pool);
+        // .bind(num_symbols)
 
         Ok(cursor)
     }
@@ -148,7 +148,7 @@ impl RecordsQuery for TradeMsg {
         let _ = params.interval_adjust_ts_start()?;
         let _ = params.interval_adjust_ts_end()?;
         let symbol_array = params.symbols_array();
-        let num_symbols = symbol_array.len() as i32;
+        // let num_symbols = symbol_array.len() as i32;
         let rank = params.rank();
 
         info!(
@@ -161,10 +161,10 @@ impl RecordsQuery for TradeMsg {
             .bind(params.start_ts)
             .bind(params.end_ts - 1)
             .bind(symbol_array)
-            .bind(num_symbols)
             .bind(rank)
             .fetch(pool);
 
+        // .bind(num_symbols)
         Ok(cursor)
     }
 }
@@ -182,7 +182,7 @@ impl RecordsQuery for BboMsg {
         let _ = params.interval_adjust_ts_end()?;
         let interval_ns = params.schema_interval()?;
         let symbol_array = params.symbols_array();
-        let num_symbols = symbol_array.len() as i32;
+        // let num_symbols = symbol_array.len() as i32;
         let rank = params.rank();
 
         info!(
@@ -196,10 +196,10 @@ impl RecordsQuery for BboMsg {
             .bind(params.end_ts)
             .bind(interval_ns)
             .bind(symbol_array)
-            .bind(num_symbols)
             .bind(rank)
             .fetch(pool);
 
+        // .bind(num_symbols)
         Ok(cursor)
     }
 }
@@ -217,7 +217,7 @@ impl RecordsQuery for OhlcvMsg {
         let _ = params.interval_adjust_ts_end()?;
         let interval_ns = params.schema_interval()?;
         let symbol_array = params.symbols_array();
-        let num_symbols = symbol_array.len() as i32;
+        // let num_symbols = symbol_array.len() as i32;
         let rank = params.rank();
 
         info!(
@@ -230,7 +230,7 @@ impl RecordsQuery for OhlcvMsg {
             .bind(params.end_ts)
             .bind(interval_ns)
             .bind(symbol_array)
-            .bind(num_symbols)
+            // .bind(num_symbols)
             .bind(rank)
             .fetch(pool);
 

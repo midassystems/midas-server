@@ -188,7 +188,7 @@ pub const FUTURES_MBP1_CONTINUOUS_QUERY: &str = r#"
             instrument_id,
             expiration_date,
             ROW_NUMBER() OVER (
-                PARTITION BY LEFT(ticker, $5)
+                PARTITION BY LEFT(ticker, 2)
                 ORDER BY expiration_date
             ) AS rank
         FROM futures
@@ -199,15 +199,15 @@ pub const FUTURES_MBP1_CONTINUOUS_QUERY: &str = r#"
     shifted_schedule AS (
         SELECT
             LEAD(ticker, shift_param.rank_shift) OVER (
-                PARTITION BY LEFT(ticker, $5)
+                PARTITION BY LEFT(ticker, 2)
                 ORDER BY rank
             ) AS current_ticker,
             LEAD(instrument_id, shift_param.rank_shift) OVER (
-                PARTITION BY LEFT(ticker, $5)
+                PARTITION BY LEFT(ticker, 2)
                 ORDER BY rank
             ) AS current_instrument_id,
             ROW_NUMBER() OVER (
-                PARTITION BY LEFT(ticker, $5)
+                PARTITION BY LEFT(ticker, 2)
                 ORDER BY rank
             ) AS rank, -- Dynamically calculate the shifted rank
             COALESCE(
@@ -218,7 +218,7 @@ pub const FUTURES_MBP1_CONTINUOUS_QUERY: &str = r#"
                         THEN $2
                         ELSE CEIL(expiration_date / 86400000000000.0) * 86400000000000
                     END
-                ) OVER (PARTITION BY LEFT(ticker, $5) ORDER BY rank),
+                ) OVER (PARTITION BY LEFT(ticker, 2) ORDER BY rank),
                 -- Align start to the user's request for the first contract, without skipping the partial day
                 CASE
                     WHEN rank = 1 THEN $1 -- Use the exact start time for the first contract
@@ -232,7 +232,7 @@ pub const FUTURES_MBP1_CONTINUOUS_QUERY: &str = r#"
             END AS end_time
         FROM active_contracts
         CROSS JOIN LATERAL (
-            SELECT $6 AS rank_shift
+            SELECT $5 AS rank_shift
         ) AS shift_param
     ),
     linear_mbp AS (
@@ -258,8 +258,8 @@ pub const FUTURES_MBP1_CONTINUOUS_QUERY: &str = r#"
             b.ask_sz,
             b.ask_ct,
             CASE
-                WHEN LAG(rs.current_instrument_id) OVER (PARTITION BY LEFT(rs.current_ticker, $5) ORDER BY m.ts_recv) IS DISTINCT FROM rs.current_instrument_id
-                     AND ROW_NUMBER() OVER (PARTITION BY LEFT(rs.current_ticker, $5) ORDER BY m.ts_recv) > 1
+                WHEN LAG(rs.current_instrument_id) OVER (PARTITION BY LEFT(rs.current_ticker, 2) ORDER BY m.ts_recv) IS DISTINCT FROM rs.current_instrument_id
+                     AND ROW_NUMBER() OVER (PARTITION BY LEFT(rs.current_ticker, 2) ORDER BY m.ts_recv) > 1
                 THEN 1
                 ELSE 0
             END AS rollover_flag -- Detect the rollover point
@@ -283,7 +283,7 @@ pub const FUTURES_TRADE_CONTINUOUS_QUERY: &str = r#"
             instrument_id,
             expiration_date,
             ROW_NUMBER() OVER (
-                PARTITION BY LEFT(ticker, $4)
+                PARTITION BY LEFT(ticker, 2)
                 ORDER BY expiration_date
             ) AS rank
         FROM futures
@@ -294,15 +294,15 @@ pub const FUTURES_TRADE_CONTINUOUS_QUERY: &str = r#"
     shifted_schedule AS (
         SELECT 
             LEAD(ticker, shift_param.rank_shift) OVER (
-                PARTITION BY LEFT(ticker, $4) 
+                PARTITION BY LEFT(ticker, 2) 
                 ORDER BY rank
             ) AS current_ticker,
             LEAD(instrument_id, shift_param.rank_shift) OVER (
-                PARTITION BY LEFT(ticker, $4)
+                PARTITION BY LEFT(ticker, 2)
                 ORDER BY rank
             ) AS current_instrument_id,
             ROW_NUMBER() OVER (
-                PARTITION BY LEFT(ticker, $4)
+                PARTITION BY LEFT(ticker, 2)
                 ORDER BY rank
             ) AS rank, -- Dynamically calculate the shifted rank
             COALESCE(
@@ -313,7 +313,7 @@ pub const FUTURES_TRADE_CONTINUOUS_QUERY: &str = r#"
                         THEN $2
                         ELSE CEIL(expiration_date / 86400000000000.0) * 86400000000000
                     END
-                ) OVER (PARTITION BY LEFT(ticker, $4) ORDER BY rank),
+                ) OVER (PARTITION BY LEFT(ticker, 2) ORDER BY rank),
                 -- Align start to the user's request for the first contract, without skipping the partial day
                 CASE
                     WHEN rank = 1 THEN $1 -- Use the exact start time for the first contract
@@ -327,7 +327,7 @@ pub const FUTURES_TRADE_CONTINUOUS_QUERY: &str = r#"
             END AS end_time
         FROM active_contracts
         CROSS JOIN LATERAL (
-            SELECT $5 AS rank_shift
+            SELECT $4 AS rank_shift
         ) AS shift_param
     ),
     trades AS (
@@ -346,8 +346,8 @@ pub const FUTURES_TRADE_CONTINUOUS_QUERY: &str = r#"
             rs.start_time,
             rs.end_time,
             CASE 
-                WHEN LAG(rs.current_instrument_id) OVER (PARTITION BY LEFT(rs.current_ticker, $4) ORDER BY m.ts_recv) IS DISTINCT FROM rs.current_instrument_id
-                     AND ROW_NUMBER() OVER (PARTITION BY LEFT(rs.current_ticker, $4) ORDER BY m.ts_recv) > 1
+                WHEN LAG(rs.current_instrument_id) OVER (PARTITION BY LEFT(rs.current_ticker, 2) ORDER BY m.ts_recv) IS DISTINCT FROM rs.current_instrument_id
+                     AND ROW_NUMBER() OVER (PARTITION BY LEFT(rs.current_ticker, 2) ORDER BY m.ts_recv) > 1
                 THEN 1
                 ELSE 0
             END AS rollover_flag -- Detect the rollover point
@@ -369,7 +369,7 @@ pub const FUTURES_OHLCV_CONTINUOUS_QUERY: &str = r#"
             instrument_id,
             expiration_date,
             ROW_NUMBER() OVER (
-                PARTITION BY LEFT(ticker, $5)
+                PARTITION BY LEFT(ticker, 2)
                 ORDER BY expiration_date
             ) AS rank
         FROM futures
@@ -380,15 +380,15 @@ pub const FUTURES_OHLCV_CONTINUOUS_QUERY: &str = r#"
     shifted_schedule AS (
         SELECT 
             LEAD(ticker, shift_param.rank_shift) OVER (
-                PARTITION BY LEFT(ticker, $5) 
+                PARTITION BY LEFT(ticker, 2) 
                 ORDER BY rank
             ) AS ticker,
             LEAD(instrument_id, shift_param.rank_shift) OVER (
-                PARTITION BY LEFT(ticker, $5)
+                PARTITION BY LEFT(ticker, 2)
                 ORDER BY rank
             ) AS current_instrument_id,
             ROW_NUMBER() OVER (
-                PARTITION BY LEFT(ticker, $5)
+                PARTITION BY LEFT(ticker, 2)
                 ORDER BY rank
             ) AS rank, -- Dynamically calculate the shifted rank
             COALESCE(
@@ -399,7 +399,7 @@ pub const FUTURES_OHLCV_CONTINUOUS_QUERY: &str = r#"
                         THEN $2
                         ELSE CEIL(expiration_date / 86400000000000.0) * 86400000000000
                     END
-                ) OVER (PARTITION BY LEFT(ticker, $5) ORDER BY rank),
+                ) OVER (PARTITION BY LEFT(ticker, 2) ORDER BY rank),
                 -- Align start to the user's request for the first contract, without skipping the partial day
                 CASE
                     WHEN rank = 1 THEN $1 -- Use the exact start time for the first contract
@@ -413,7 +413,7 @@ pub const FUTURES_OHLCV_CONTINUOUS_QUERY: &str = r#"
             END AS end_time
         FROM active_contracts
         CROSS JOIN LATERAL (
-            SELECT $6 AS rank_shift
+            SELECT $5 AS rank_shift
         ) AS shift_param
     ),
     grouped_data AS (
@@ -432,8 +432,8 @@ pub const FUTURES_OHLCV_CONTINUOUS_QUERY: &str = r#"
                 ORDER BY m.ts_recv DESC, m.ctid DESC
             ) AS reverse_row_number,
             CASE 
-                WHEN LAG(rs.current_instrument_id) OVER (PARTITION BY LEFT(rs.ticker, $5) ORDER BY m.ts_recv) IS DISTINCT FROM rs.current_instrument_id
-                     AND ROW_NUMBER() OVER (PARTITION BY LEFT(rs.ticker, $5) ORDER BY m.ts_recv) > 1
+                WHEN LAG(rs.current_instrument_id) OVER (PARTITION BY LEFT(rs.ticker, 2) ORDER BY m.ts_recv) IS DISTINCT FROM rs.current_instrument_id
+                     AND ROW_NUMBER() OVER (PARTITION BY LEFT(rs.ticker, 2) ORDER BY m.ts_recv) > 1
                 THEN 1
                 ELSE 0
             END AS rollover_flag -- Detect rollover
@@ -478,7 +478,7 @@ pub const FUTURES_BBO_CONTINUOUS_QUERY: &str = r#"
             instrument_id,
             expiration_date,
             ROW_NUMBER() OVER (
-                PARTITION BY LEFT(ticker, $5)
+                PARTITION BY LEFT(ticker, 2)
                 ORDER BY expiration_date
             ) AS rank
         FROM futures
@@ -489,15 +489,15 @@ pub const FUTURES_BBO_CONTINUOUS_QUERY: &str = r#"
     shifted_schedule AS (
         SELECT
             LEAD(ticker, shift_param.rank_shift) OVER (
-                PARTITION BY LEFT(ticker, $5)
+                PARTITION BY LEFT(ticker, 2)
                 ORDER BY rank
             ) AS current_ticker,
             LEAD(instrument_id, shift_param.rank_shift) OVER (
-                PARTITION BY LEFT(ticker, $5)
+                PARTITION BY LEFT(ticker, 2)
                 ORDER BY rank
             ) AS current_instrument_id,
             ROW_NUMBER() OVER (
-                PARTITION BY LEFT(ticker, $5)
+                PARTITION BY LEFT(ticker, 2)
                 ORDER BY rank
             ) AS rank, -- Dynamically calculate the shifted rank
             COALESCE(
@@ -508,7 +508,7 @@ pub const FUTURES_BBO_CONTINUOUS_QUERY: &str = r#"
                         THEN $2
                         ELSE CEIL(expiration_date / 86400000000000.0) * 86400000000000
                     END
-                ) OVER (PARTITION BY LEFT(ticker, $5) ORDER BY rank),
+                ) OVER (PARTITION BY LEFT(ticker, 2) ORDER BY rank),
                 -- Align start to the user's request for the first contract, without skipping the partial day
                 CASE
                     WHEN rank = 1 
@@ -523,7 +523,7 @@ pub const FUTURES_BBO_CONTINUOUS_QUERY: &str = r#"
             END AS end_time
         FROM active_contracts
         CROSS JOIN LATERAL (
-            SELECT $6 AS rank_shift
+            SELECT $5 AS rank_shift
         ) AS shift_param
     ),
     ordered_data AS (
@@ -547,8 +547,8 @@ pub const FUTURES_BBO_CONTINUOUS_QUERY: &str = r#"
             row_number() OVER (PARTITION BY m.instrument_id, floor((m.ts_recv - 1) / $3) * $3 ORDER BY m.ts_recv ASC, m.ctid ASC) AS first_row,
             row_number() OVER (PARTITION BY m.instrument_id, floor((m.ts_recv - 1) / $3) * $3 ORDER BY m.ts_recv DESC, m.ctid DESC) AS last_row,
             CASE 
-                WHEN LAG(rs.current_instrument_id) OVER (PARTITION BY LEFT(rs.current_ticker, $5) ORDER BY m.ts_recv) IS DISTINCT FROM rs.current_instrument_id
-                    AND ROW_NUMBER() OVER (PARTITION BY LEFT(rs.current_ticker, $5) ORDER BY m.ts_recv) > 1
+                WHEN LAG(rs.current_instrument_id) OVER (PARTITION BY LEFT(rs.current_ticker, 2) ORDER BY m.ts_recv) IS DISTINCT FROM rs.current_instrument_id
+                    AND ROW_NUMBER() OVER (PARTITION BY LEFT(rs.current_ticker, 2) ORDER BY m.ts_recv) > 1
                 THEN 1
                 ELSE 0
             END AS rollover_flag -- Detect rollover
