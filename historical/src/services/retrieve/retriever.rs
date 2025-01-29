@@ -26,8 +26,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info};
 
 pub struct ContinuousMap {
-    pub id_map: HashMap<i32, HashMap<String, u32>>, // rank -> { prefix -> id }
-    // pub id_map: HashMap<String, u32>,
+    pub id_map: HashMap<i32, HashMap<String, u32>>,
     pub type_map: HashMap<String, HashMap<i32, Vec<String>>>,
 }
 
@@ -73,15 +72,9 @@ impl ContinuousMap {
         }
     }
     /// Retrieves the ID from `id_map` given a full ticker
-    pub fn get_id(&self, ticker: &str) -> Option<u32> {
-        if let Some((prefix, rest)) = ticker.split_once('.') {
-            if let Some((_kind, rank_str)) = rest.split_once('.') {
-                if let Ok(rank) = rank_str.parse::<i32>() {
-                    return self.id_map.get(&rank)?.get(prefix).copied();
-                }
-            }
-        }
-        None
+    pub fn get_id(&self, ticker: &str, rank: i32) -> Option<u32> {
+        let prefix = ticker.get(..2).unwrap_or(""); // TODO: Should be an error
+        return self.id_map.get(&rank)?.get(prefix).copied();
     }
 }
 
@@ -323,13 +316,8 @@ impl RecordGetter {
         for (index, ticker) in retrieve_params.symbols.iter().enumerate() {
             let synthetic_id = 1_000_000 + index as u32; // Generate synthetic ID
             symbol_map.add_instrument(&ticker, synthetic_id);
-            // let prefix = ticker.get(..2).unwrap_or(""); // TODO: Should be an error
             continuous_map.update_id_map(ticker, synthetic_id);
-            // continuous_map
-            //     .id_map
-            //     .insert(prefix.to_string(), synthetic_id);
         }
-        // println!("{:?}", continuous_map);
 
         // Construct metadata with the synthetic symbol_map
         let metadata = Metadata::new(
@@ -361,7 +349,6 @@ impl RecordGetter {
                     "Processing kind: {}, rank: {}, tickers: {:?}",
                     kind, rank, tickers
                 );
-                // let new_id = continuous_map.id_map.get(prefix).copied();
 
                 retrieve_params.symbols = tickers.clone();
 
@@ -372,10 +359,7 @@ impl RecordGetter {
                     match row_result {
                         Ok(row) => {
                             let ticker: String = row.try_get("ticker")?;
-                            let new_id = continuous_map.get_id(&ticker); // TODO:
-                                                                         // handle better
-                                                                         // let prefix = ticker.get(..2).unwrap_or("");
-                                                                         // let new_id = continuous_map.id_map.get(prefix).copied();
+                            let new_id = continuous_map.get_id(&ticker, *rank);
 
                             // Use the from_row_fn here
                             let record = from_row_fn(&row, new_id)?;
@@ -506,8 +490,6 @@ impl RecordGetter {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-
     use super::*;
     use crate::database::init::init_db;
     use dotenv;
@@ -519,6 +501,7 @@ mod test {
     use mbn::vendors::{DatabentoData, VendorData};
     use serial_test::serial;
     use sqlx::postgres::PgPoolOptions;
+    use std::str::FromStr;
 
     // -- Helper functions
     async fn create_instrument(instrument: Instrument) -> Result<i32> {
@@ -663,6 +646,100 @@ mod test {
         for id in ids {
             delete_instrument(id).await.expect("Error on delete");
         }
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[serial]
+    async fn test_continuous_map_type_map() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+
+        let tickers = vec![
+            "HE.c.1".to_string(),
+            "HE.c.0".to_string(),
+            "LE.c.1".to_string(),
+            "LE.c.0".to_string(),
+        ];
+
+        // Test
+        let mut c_map = ContinuousMap::new();
+        c_map.build_type_map(tickers);
+
+        // Validate
+        let expected = HashMap::from([(
+            "c".to_string(),
+            HashMap::from([
+                (1, vec!["HE.c.1".to_string(), "LE.c.1".to_string()]),
+                (0, vec!["HE.c.0".to_string(), "LE.c.0".to_string()]),
+            ]),
+        )]);
+        assert_eq!(expected, c_map.type_map);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[serial]
+    async fn test_continuous_update_id_map() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+
+        let tickers = vec![
+            "HE.c.1".to_string(),
+            "HE.c.0".to_string(),
+            "LE.c.1".to_string(),
+            "LE.c.0".to_string(),
+        ];
+
+        // Test
+        let mut c_map = ContinuousMap::new();
+        c_map.build_type_map(tickers.clone());
+
+        // Dynamically generate synthetic symbol_map for continuous contracts
+        for (index, ticker) in tickers.iter().enumerate() {
+            let synthetic_id = 1_000_000 + index as u32; // Generate synthetic ID
+            c_map.update_id_map(ticker, synthetic_id);
+        }
+
+        // Validate
+        let expected = HashMap::from([
+            (
+                1,
+                HashMap::from([("HE".to_string(), 1000000), ("LE".to_string(), 1000002)]),
+            ),
+            (
+                0,
+                HashMap::from([("HE".to_string(), 1000001), ("LE".to_string(), 1000003)]),
+            ),
+        ]);
+
+        assert_eq!(expected, c_map.id_map);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[serial]
+    async fn test_id_map() -> anyhow::Result<()> {
+        let tickers = vec![
+            "HE.c.1".to_string(),
+            "HE.c.0".to_string(),
+            "LE.c.1".to_string(),
+            "LE.c.0".to_string(),
+        ];
+
+        // Test
+        let mut c_map = ContinuousMap::new();
+        c_map.build_type_map(tickers.clone());
+
+        // Dynamically generate synthetic symbol_map for continuous contracts
+        for (index, ticker) in tickers.iter().enumerate() {
+            let synthetic_id = 1_000_000 + index as u32; // Generate synthetic ID
+            c_map.update_id_map(ticker, synthetic_id);
+        }
+
+        assert_eq!(c_map.get_id("HEG4", 0).unwrap(), 1000001);
+        assert_eq!(c_map.get_id("LEG4", 1).unwrap(), 1000002);
 
         Ok(())
     }
