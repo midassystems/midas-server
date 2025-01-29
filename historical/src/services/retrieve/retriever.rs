@@ -26,7 +26,8 @@ use tokio::sync::Mutex;
 use tracing::{error, info};
 
 pub struct ContinuousMap {
-    pub id_map: HashMap<String, u32>,
+    pub id_map: HashMap<i32, HashMap<String, u32>>, // rank -> { prefix -> id }
+    // pub id_map: HashMap<String, u32>,
     pub type_map: HashMap<String, HashMap<i32, Vec<String>>>,
 }
 
@@ -56,6 +57,31 @@ impl ContinuousMap {
                 }
             }
         }
+    }
+
+    /// Updates `id_map` with a given ticker and ID
+    pub fn update_id_map(&mut self, ticker: &str, id: u32) {
+        if let Some((prefix, rest)) = ticker.split_once('.') {
+            if let Some((_kind, rank_str)) = rest.split_once('.') {
+                if let Ok(rank) = rank_str.parse::<i32>() {
+                    self.id_map
+                        .entry(rank)
+                        .or_insert_with(HashMap::new)
+                        .insert(prefix.to_string(), id);
+                }
+            }
+        }
+    }
+    /// Retrieves the ID from `id_map` given a full ticker
+    pub fn get_id(&self, ticker: &str) -> Option<u32> {
+        if let Some((prefix, rest)) = ticker.split_once('.') {
+            if let Some((_kind, rank_str)) = rest.split_once('.') {
+                if let Ok(rank) = rank_str.parse::<i32>() {
+                    return self.id_map.get(&rank)?.get(prefix).copied();
+                }
+            }
+        }
+        None
     }
 }
 
@@ -297,11 +323,13 @@ impl RecordGetter {
         for (index, ticker) in retrieve_params.symbols.iter().enumerate() {
             let synthetic_id = 1_000_000 + index as u32; // Generate synthetic ID
             symbol_map.add_instrument(&ticker, synthetic_id);
-            let prefix = ticker.get(..2).unwrap_or(""); // TODO: Should be an error
-            continuous_map
-                .id_map
-                .insert(prefix.to_string(), synthetic_id);
+            // let prefix = ticker.get(..2).unwrap_or(""); // TODO: Should be an error
+            continuous_map.update_id_map(ticker, synthetic_id);
+            // continuous_map
+            //     .id_map
+            //     .insert(prefix.to_string(), synthetic_id);
         }
+        // println!("{:?}", continuous_map);
 
         // Construct metadata with the synthetic symbol_map
         let metadata = Metadata::new(
@@ -333,6 +361,7 @@ impl RecordGetter {
                     "Processing kind: {}, rank: {}, tickers: {:?}",
                     kind, rank, tickers
                 );
+                // let new_id = continuous_map.id_map.get(prefix).copied();
 
                 retrieve_params.symbols = tickers.clone();
 
@@ -343,8 +372,10 @@ impl RecordGetter {
                     match row_result {
                         Ok(row) => {
                             let ticker: String = row.try_get("ticker")?;
-                            let prefix = ticker.get(..2).unwrap_or("");
-                            let new_id = continuous_map.id_map.get(prefix).copied();
+                            let new_id = continuous_map.get_id(&ticker); // TODO:
+                                                                         // handle better
+                                                                         // let prefix = ticker.get(..2).unwrap_or("");
+                                                                         // let new_id = continuous_map.id_map.get(prefix).copied();
 
                             // Use the from_row_fn here
                             let record = from_row_fn(&row, new_id)?;
@@ -471,79 +502,6 @@ impl RecordGetter {
             self.stream_rawsymbols().await
         }
     }
-    //
-    // let p_stream = stream! {
-    //     // Stream metadata first
-    //     match self.process_metadata().await {
-    //         Ok(metadata_cursor) => {
-    //             let buffer_ref = metadata_cursor.get_ref();
-    //             let bytes = Bytes::copy_from_slice(buffer_ref);
-    //             yield Ok::<Bytes, Error>(bytes);
-    //         }
-    //         Err(e) => {
-    //             let response = ApiResponse::new(
-    //                 "failed",
-    //                 &format!("{:?}", e),
-    //                 StatusCode::CONFLICT,
-    //                 "".to_string(),
-    //             );
-    //             yield Ok(response.bytes());
-    //             return;
-    //         }
-    //     };
-    //
-    //     // Spawn record processing
-    //     let record_getter = Arc::clone(&self);
-    //     let _records_processing = tokio::spawn(async move {
-    //         record_getter.process_records().await
-    //     });
-    //
-    //     // Stream record batches while processing continues
-    //     loop {
-    //         let end_records = self.end_records.lock().await;
-    //         if *end_records {
-    //             break;
-    //         }
-    //
-    //         let mut batch_counter = self.batch_counter.lock().await;
-    //         if *batch_counter > self.batch_size {
-    //             let batch_bytes = {
-    //                 let cursor = self.cursor.lock().await;
-    //                 Bytes::copy_from_slice(cursor.get_ref())
-    //             };
-    //
-    //             info!("Sending buffer, size: {:?}", batch_bytes.len());
-    //             yield Ok::<Bytes, Error>(batch_bytes);
-    //
-    //             // Reset cursor and batch counter
-    //             {
-    //                 let mut cursor = self.cursor.lock().await;
-    //                 cursor.get_mut().clear();
-    //                 cursor.set_position(0);
-    //             }
-    //             *batch_counter = 0;
-    //         }
-    //
-    //         drop(batch_counter);
-    //         drop(end_records);
-    //
-    //         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-    //     }
-    //
-    //     // Send any remaining data that wasn't part of a full batch
-    //     if !self.cursor.lock().await.get_ref().is_empty() {
-    //         let remaining_bytes = Bytes::copy_from_slice(self.cursor.lock().await.get_ref());
-    //         info!("Sending remaining buffer, size: {:?}", remaining_bytes.len());
-    //         yield Ok::<Bytes, Error>(remaining_bytes);
-    //     }
-    //
-    //     info!("Finished streaming all batches");
-    //     yield Ok(Bytes::from("Finished streaming all batches"));
-    //     return;
-    // };
-    //
-    // Box::pin(p_stream)
-    // }
 }
 
 #[cfg(test)]

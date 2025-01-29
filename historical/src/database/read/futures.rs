@@ -178,7 +178,7 @@ pub const FUTURES_BBO_QUERY: &str = r#"
     FROM filled_price_size fp
     INNER JOIN futures i ON fp.instrument_id = i.instrument_id
     WHERE fp.ts_recv BETWEEN $1 AND ($2 - $3)
-    ORDER BY fp.ts_recv;
+    ORDER BY fp.ts_recv
     "#;
 
 pub const FUTURES_MBP1_CONTINUOUS_QUERY: &str = r#"
@@ -545,13 +545,7 @@ pub const FUTURES_BBO_CONTINUOUS_QUERY: &str = r#"
             b.bid_ct,
             b.ask_ct,
             row_number() OVER (PARTITION BY m.instrument_id, floor((m.ts_recv - 1) / $3) * $3 ORDER BY m.ts_recv ASC, m.ctid ASC) AS first_row,
-            row_number() OVER (PARTITION BY m.instrument_id, floor((m.ts_recv - 1) / $3) * $3 ORDER BY m.ts_recv DESC, m.ctid DESC) AS last_row,
-            CASE 
-                WHEN LAG(rs.current_instrument_id) OVER (PARTITION BY LEFT(rs.current_ticker, 2) ORDER BY m.ts_recv) IS DISTINCT FROM rs.current_instrument_id
-                    AND ROW_NUMBER() OVER (PARTITION BY LEFT(rs.current_ticker, 2) ORDER BY m.ts_recv) > 1
-                THEN 1
-                ELSE 0
-            END AS rollover_flag -- Detect rollover
+            row_number() OVER (PARTITION BY m.instrument_id, floor((m.ts_recv - 1) / $3) * $3 ORDER BY m.ts_recv DESC, m.ctid DESC) AS last_row
         FROM futures_mbp m
         INNER JOIN shifted_schedule rs
             ON m.instrument_id = rs.current_instrument_id
@@ -585,8 +579,7 @@ pub const FUTURES_BBO_CONTINUOUS_QUERY: &str = r#"
             MAX(o.size) FILTER (WHERE o.ts_recv = t.last_trade_ts_recv AND o.id = t.last_trade_id AND o.action = 84) AS last_trade_size,
             MAX(o.side) FILTER (WHERE o.ts_recv = t.last_trade_ts_recv AND o.id = t.last_trade_id AND o.action = 84) AS last_trade_side,
             MAX(o.flags) FILTER (WHERE o.last_row = 1) AS last_trade_flags,
-            MIN(o.sequence) FILTER (WHERE o.last_row = 1) AS last_trade_sequence,
-            MAX(o.rollover_flag) AS rollover_flag -- Propagate rollover flag
+            MIN(o.sequence) FILTER (WHERE o.last_row = 1) AS last_trade_sequence
         FROM ordered_data o
         LEFT JOIN trade_data t ON o.instrument_id = t.instrument_id AND floor((o.ts_recv - 1) / $3) * $3 = t.ts_recv_start
         GROUP BY o.instrument_id, floor((o.ts_recv - 1) / $3) * $3, t.last_trade_ts_recv, t.last_trade_id
@@ -607,8 +600,7 @@ pub const FUTURES_BBO_CONTINUOUS_QUERY: &str = r#"
             a.last_trade_size,
             a.last_trade_side,
             a.last_trade_flags,
-            a.last_trade_sequence,
-            a.rollover_flag
+            a.last_trade_sequence
         FROM aggregated_data a
     ),
     -- Step 2: Forward-fill price and size based on the now-filled ts_event
@@ -627,8 +619,7 @@ pub const FUTURES_BBO_CONTINUOUS_QUERY: &str = r#"
             f.last_bid_ct AS bid_ct,
             f.last_ask_ct AS ask_ct,
             f.last_trade_flags AS flags,
-            f.last_trade_sequence AS sequence,
-            f.rollover_flag -- Propagate rollover flag
+            f.last_trade_sequence AS sequence
         FROM filled_ts_event f
     )
     SELECT
@@ -646,13 +637,18 @@ pub const FUTURES_BBO_CONTINUOUS_QUERY: &str = r#"
         fp.side,
         fp.flags,
         fp.sequence,
-        fp.rollover_flag, -- Include the rollover flag
-        i.ticker
+        i.ticker,
+        CASE
+            WHEN LAG(rs.current_instrument_id) OVER (PARTITION BY LEFT(rs.current_ticker, 2) ORDER BY fp.ts_recv) IS DISTINCT FROM rs.current_instrument_id
+                AND ROW_NUMBER() OVER (PARTITION BY LEFT(rs.current_ticker, 2) ORDER BY fp.ts_recv) > 1
+            THEN 1
+            ELSE 0
+        END AS rollover_flag
     FROM filled_price_size fp
     INNER JOIN shifted_schedule rs
         ON fp.instrument_id = rs.current_instrument_id
         AND fp.ts_recv BETWEEN rs.start_time AND rs.end_time
     INNER JOIN futures i ON fp.instRument_id = i.instrument_id
     WHERE fp.ts_recv BETWEEN $1 AND ($2 - $3)
-    ORDER BY fp.ts_recv;
+    ORDER BY fp.ts_recv
     "#;

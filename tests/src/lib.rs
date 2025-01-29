@@ -422,6 +422,10 @@ mod tests {
         // Conitnuous
         test_get_records_vs_dbn_continuous_calendar().await?;
 
+        // Rolllover flag
+        // test_rollover2().await?;
+        test_rollover().await?;
+
         // Cleanup
         teardown_tickers().await?;
 
@@ -495,6 +499,102 @@ mod tests {
             // Test
             compare_dbn_raw_output(dbn_file.clone(), &PathBuf::from(mbn_file.clone())).await?;
             compare_dbn(dbn_file, &PathBuf::from(mbn_file)).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn test_rollover() -> anyhow::Result<()> {
+        let schemas = vec![
+            Schema::Mbp1,
+            Schema::Tbbo,
+            Schema::Trades,
+            // Schema::Bbo1S,
+            // Schema::Bbo1M,
+            Schema::Ohlcv1S,
+            Schema::Ohlcv1M,
+            Schema::Ohlcv1H,
+            Schema::Ohlcv1D,
+        ];
+
+        for schema in &schemas {
+            let mbn_file = format!(
+                "data/midas/HE.c.0_HE.c.1_LE.c.0_LE.c.1_{}.bin",
+                schema.to_string()
+            );
+            let mut decoder = AsyncDecoder::<BufReader<File>>::from_file(mbn_file).await?;
+
+            // Write MBN records to file
+            let mut rollover_records = Vec::new();
+            while let Some(mbn_record) = decoder.decode_ref().await? {
+                let record_enum = RecordEnum::from_ref(mbn_record)?;
+                if record_enum.msg().header().rollover_flag == 1 {
+                    rollover_records.push(record_enum);
+                }
+            }
+            assert_eq!(rollover_records.len(), 2);
+        }
+
+        Ok(())
+    }
+
+    use std::collections::HashMap;
+
+    #[allow(dead_code)]
+    async fn test_rollover2() -> anyhow::Result<()> {
+        let schemas = vec![
+            Schema::Mbp1,
+            Schema::Tbbo,
+            Schema::Trades,
+            Schema::Bbo1S,
+            Schema::Bbo1M,
+            Schema::Ohlcv1S,
+            Schema::Ohlcv1M,
+            Schema::Ohlcv1H,
+            Schema::Ohlcv1D,
+        ];
+
+        println!("Testing Rollovers: ");
+
+        // Iterate over each schema
+        for schema in &schemas {
+            let mbn_file = format!(
+                "data/midas/HE.c.0_HE.c.1_LE.c.0_LE.c.1_{}.bin",
+                schema.to_string()
+            );
+
+            let mut decoder = AsyncDecoder::<BufReader<File>>::from_file(mbn_file).await?;
+            println!("{:?}", decoder.metadata());
+
+            // Create file to store rollover records
+            let mut mbn_rollover_file =
+                File::create(format!("test_rollover_{}.txt", schema.to_string())).await?;
+
+            // Initialize a HashMap to count occurrences of instrument_ids
+            let mut instrument_count: HashMap<u32, u32> = HashMap::new();
+
+            // Decode and process the records
+            while let Some(mbn_record) = decoder.decode_ref().await? {
+                let record_enum = RecordEnum::from_ref(mbn_record)?;
+
+                // Track the instrument_id count
+                let instrument_id = record_enum.msg().header().instrument_id;
+                *instrument_count.entry(instrument_id).or_insert(0) += 1;
+
+                // If rollover_flag is 1, write to the file
+                if record_enum.msg().header().rollover_flag == 1 {
+                    mbn_rollover_file
+                        .write_all(format!("{:?}\n", record_enum).as_bytes())
+                        .await?;
+                }
+            }
+
+            // Print the count of each instrument_id to confirm distribution
+            println!(
+                "Instrument ID Counts for schema {}: {:?}",
+                schema.to_string(),
+                instrument_count
+            );
         }
 
         Ok(())
