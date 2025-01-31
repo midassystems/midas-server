@@ -333,7 +333,6 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
- "serde",
 ]
 
 [[package]]
@@ -1575,13 +1574,11 @@ checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
 
 [[package]]
 name = "mbn"
-version = "1.0.6"
-source = "git+https://github.com/midassystems/mbn.git?branch=main#e97a2baa2f1f34c146be96508ee82188a5430938"
+version = "1.0.15"
+source = "git+https://github.com/midassystems/mbn.git?branch=main#6e5dead22e33359ef59f12c678a8f29d8f2df7df"
 dependencies = [
- "bigdecimal",
  "bytemuck",
  "chrono",
- "databento",
  "dbn",
  "futures",
  "num_enum",
@@ -1591,8 +1588,6 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -2517,9 +2512,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.128"
+version = "1.0.138"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ff5456707a1de34e7e37f2a6fd3d3f808c318259cbd01ab6377795054b483d8"
+checksum = "d434192e7da787e94a6ea7e9670b26a036d0ca41e0b7efb2676dd32bae872949"
 dependencies = [
  "itoa",
  "memchr",
