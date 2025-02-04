@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
-use mbn::enums::Dataset;
-use mbn::symbols::SymbolMap;
+use mbinary::enums::Dataset;
+use mbinary::symbols::SymbolMap;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
 pub async fn start_transaction(pool: &PgPool) -> Result<Transaction<'_, Postgres>> {
@@ -46,10 +46,10 @@ mod test {
     use super::*;
     use crate::database::init::init_db;
     use dotenv;
-    use mbn::symbols::Instrument;
-    use mbn::symbols::SymbolMap;
-    use mbn::vendors::Vendors;
-    use mbn::vendors::{DatabentoData, VendorData};
+    use mbinary::symbols::Instrument;
+    use mbinary::symbols::SymbolMap;
+    use mbinary::vendors::Vendors;
+    use mbinary::vendors::{DatabentoData, VendorData};
     use serial_test::serial;
     use sqlx::postgres::PgPoolOptions;
 

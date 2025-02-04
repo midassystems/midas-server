@@ -1,6 +1,6 @@
 use crate::{Error, Result};
 use async_trait::async_trait;
-use mbn::{
+use mbinary::{
     enums::Dataset,
     symbols::{Instrument, SymbolMap},
     vendors::Vendors,
@@ -292,8 +292,8 @@ mod test {
     use crate::database::init::init_db;
     use dbn;
     use dotenv;
-    use mbn::symbols::SymbolMap;
-    use mbn::vendors::{DatabentoData, VendorData};
+    use mbinary::symbols::SymbolMap;
+    use mbinary::vendors::{DatabentoData, VendorData};
     use serial_test::serial;
 
     pub async fn create_instrument_dummy(ticker: &str) -> anyhow::Result<i32> {

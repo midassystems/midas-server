@@ -3,7 +3,7 @@ use crate::database::backtest::{
     TimeseriesTypes, TradesQueries,
 };
 use crate::Result;
-use mbn::backtest::{
+use mbinary::backtest::{
     BacktestData, BacktestMetaData, Parameters, Signals, StaticStats, TimeseriesStats, Trades,
 };
 use sqlx::PgPool;

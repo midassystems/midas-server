@@ -17,8 +17,8 @@ pub enum Error {
     EnvVarError(#[from] std::env::VarError),
     #[error("General error: {0}")]
     GeneralError(#[from] Box<dyn std::error::Error + Send + Sync + 'static>),
-    #[error("MBN error: {0}")]
-    MbnError(#[from] mbn::error::Error),
+    #[error("Mbinary error: {0}")]
+    MbinaryError(#[from] mbinary::error::Error),
     #[error("Custom error: {0}")]
     CustomError(String),
 }
@@ -31,7 +31,7 @@ impl Into<ApiResponse<String>> for Error {
             Error::IoError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
             Error::EnvVarError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
             Error::GeneralError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
-            Error::MbnError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
+            Error::MbinaryError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
             Error::CustomError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
         };
 

@@ -1,6 +1,6 @@
 use crate::Result;
 use async_trait::async_trait;
-use mbn::backtest::{
+use mbinary::backtest::{
     BacktestData, Parameters, SignalInstructions, Signals, StaticStats, TimeseriesStats, Trades,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};

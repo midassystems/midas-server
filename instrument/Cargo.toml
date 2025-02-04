@@ -16,7 +16,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "json"]
 thiserror = "1.0.61"
 anyhow = "1.0.86"
 bytes = "1.7.1"
-mbn = { git = "https://github.com/midassystems/mbn.git", branch =  "main" }
+mbinary = {version= "1.0.20"}
 
 [dev-dependencies]
 hyper = "0.14"

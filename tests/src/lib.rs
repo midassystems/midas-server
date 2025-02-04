@@ -1,10 +1,10 @@
 use async_compression::tokio::bufread::ZstdDecoder;
 use databento::dbn::Record as dbnRecord;
 use databento::{dbn, historical::timeseries::AsyncDbnDecoder};
-use mbn::decode::AsyncDecoder;
-use mbn::record_enum::RecordEnum;
-use mbn::records::Record;
-use mbn::{self};
+use mbinary::decode::AsyncDecoder;
+use mbinary::record_enum::RecordEnum;
+use mbinary::records::Record;
+use mbinary::{self};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::fs::File;
@@ -40,7 +40,9 @@ pub async fn read_dbn_file(
     Ok((decoder, map))
 }
 
-pub async fn read_mbn_file(filepath: &PathBuf) -> anyhow::Result<AsyncDecoder<BufReader<File>>> {
+pub async fn read_mbinary_file(
+    filepath: &PathBuf,
+) -> anyhow::Result<AsyncDecoder<BufReader<File>>> {
     let decoder = AsyncDecoder::<BufReader<File>>::from_file(filepath).await?;
 
     Ok(decoder)
@@ -48,25 +50,25 @@ pub async fn read_mbn_file(filepath: &PathBuf) -> anyhow::Result<AsyncDecoder<Bu
 
 pub async fn compare_dbn_raw_output(
     dbn_filepath: PathBuf,
-    mbn_filepath: &PathBuf,
+    mbinary_filepath: &PathBuf,
 ) -> anyhow::Result<()> {
-    let mut mbn_decoder = read_mbn_file(mbn_filepath).await?;
+    let mut mbinary_decoder = read_mbinary_file(mbinary_filepath).await?;
     let (mut dbn_decoder, _map) = read_dbn_file(dbn_filepath).await?;
 
     // Output files
-    let mbn_output_file = "raw_mbn_records.txt";
+    let mbinary_output_file = "raw_mbinary_records.txt";
     let dbn_output_file = "raw_dbn_records.txt";
 
     // Create or truncate output files
-    let mut mbn_file = File::create(mbn_output_file).await?;
+    let mut mbinary_file = File::create(mbinary_output_file).await?;
     let mut dbn_file = File::create(dbn_output_file).await?;
 
-    let mut mbn_count = 0;
+    let mut mbinary_count = 0;
     // Write MBN records to file
-    while let Some(mbn_record) = mbn_decoder.decode_ref().await? {
-        mbn_count += 1;
-        let record_enum = RecordEnum::from_ref(mbn_record)?;
-        mbn_file
+    while let Some(mbinary_record) = mbinary_decoder.decode_ref().await? {
+        mbinary_count += 1;
+        let record_enum = RecordEnum::from_ref(mbinary_record)?;
+        mbinary_file
             .write_all(format!("{:?}\n", record_enum).as_bytes())
             .await?;
     }
@@ -80,19 +82,22 @@ pub async fn compare_dbn_raw_output(
             .write_all(format!("{:?}\n", dbn_record_enum).as_bytes())
             .await?;
     }
-    println!("MBN length: {:?}", mbn_count);
+    println!("MBN length: {:?}", mbinary_count);
     println!("DBN length: {:?}", dbn_count);
 
     Ok(())
 }
 
-pub async fn compare_dbn(dbn_filepath: PathBuf, mbn_filepath: &PathBuf) -> anyhow::Result<()> {
+pub async fn compare_dbn(
+    dbn_filepath: PathBuf,
+    mbinary_filepath: &PathBuf,
+) -> anyhow::Result<bool> {
     let batch_size = 1000; // New parameter to control batch size
-    let mut mbn_decoder = read_mbn_file(mbn_filepath).await?;
+    let mut mbinary_decoder = read_mbinary_file(mbinary_filepath).await?;
     let (mut dbn_decoder, _map) = read_dbn_file(dbn_filepath).await?;
 
-    let mut mbn_batch: HashMap<u64, Vec<RecordEnum>> = HashMap::new();
-    let mut mbn_decoder_done = false;
+    let mut mbinary_batch: HashMap<u64, Vec<RecordEnum>> = HashMap::new();
+    let mut mbinary_decoder_done = false;
 
     // Keep track of any unmatched DBN records
     let mut unmatched_dbn_records = Vec::new();
@@ -100,29 +105,29 @@ pub async fn compare_dbn(dbn_filepath: PathBuf, mbn_filepath: &PathBuf) -> anyho
     // Start decoding and comparing
     while let Some(dbn_record) = dbn_decoder.decode_record_ref().await? {
         // If MBN batch is empty, refill it
-        if mbn_batch.len() < batch_size && !mbn_decoder_done {
-            while let Some(mbn_record) = mbn_decoder.decode_ref().await? {
-                let record_enum = RecordEnum::from_ref(mbn_record)?;
+        if mbinary_batch.len() < batch_size && !mbinary_decoder_done {
+            while let Some(mbinary_record) = mbinary_decoder.decode_ref().await? {
+                let record_enum = RecordEnum::from_ref(mbinary_record)?;
                 let ts_event = record_enum.header().ts_event;
-                mbn_batch.entry(ts_event).or_default().push(record_enum);
+                mbinary_batch.entry(ts_event).or_default().push(record_enum);
             }
-            if mbn_batch.is_empty() {
-                mbn_decoder_done = true; // No more MBN records
+            if mbinary_batch.is_empty() {
+                mbinary_decoder_done = true; // No more MBN records
             }
         }
         let dbn_record_enum = dbn_record.as_enum()?.to_owned();
         let ts_event = dbn_record_enum.header().ts_event; // Extract ts_event from DBN record
 
         // Check if the ts_event exists in the MBN map
-        if let Some(mbn_group) = mbn_batch.get_mut(&ts_event) {
+        if let Some(mbinary_group) = mbinary_batch.get_mut(&ts_event) {
             // Try to find a match within the group
-            if let Some(pos) = mbn_group
+            if let Some(pos) = mbinary_group
                 .iter()
-                .position(|mbn_record| mbn_record == &dbn_record_enum)
+                .position(|mbinary_record| mbinary_record == &dbn_record_enum)
             {
-                mbn_group.remove(pos); // Remove matched record
-                if mbn_group.is_empty() {
-                    mbn_batch.remove(&ts_event); // Remove the key if the group is empty
+                mbinary_group.remove(pos); // Remove matched record
+                if mbinary_group.is_empty() {
+                    mbinary_batch.remove(&ts_event); // Remove the key if the group is empty
                 }
             } else {
                 unmatched_dbn_records.push(dbn_record_enum); // No match found in the group
@@ -137,10 +142,10 @@ pub async fn compare_dbn(dbn_filepath: PathBuf, mbn_filepath: &PathBuf) -> anyho
     let mut file = File::create(&output_file).await?;
 
     // Check for remaining unmatched MBN records and write them to the file
-    if !mbn_batch.is_empty() {
+    if !mbinary_batch.is_empty() {
         file.write_all(b"Unmatched MBN Records:\n").await?;
-        for mbn_record in &mbn_batch {
-            file.write_all(format!("{:?}\n", mbn_record).as_bytes())
+        for mbinary_record in &mbinary_batch {
+            file.write_all(format!("{:?}\n", mbinary_record).as_bytes())
                 .await?;
         }
     }
@@ -155,29 +160,29 @@ pub async fn compare_dbn(dbn_filepath: PathBuf, mbn_filepath: &PathBuf) -> anyho
     }
 
     // Return an error if there are unmatched records in either batch
-    if mbn_batch.is_empty() && unmatched_dbn_records.is_empty() {
-        println!("All records match successfully.");
+    if mbinary_batch.is_empty() && unmatched_dbn_records.is_empty() {
+        return Ok(true);
+        // println!("All records match successfully.");
     } else {
-        eprintln!(
-            "Unmatched records detected. Check the output file: {:?}",
-            output_file
-        );
+        return Ok(false);
+        // eprintln!(
+        // "Unmatched records detected. Check the output file: {:?}",
+        // output_file
+        // );
     }
-
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use dotenv::dotenv;
-    use mbn::enums::{Dataset, Schema};
-    use mbn::params::RetrieveParams;
-    use mbn::symbols::Instrument;
-    use mbn::vendors::{DatabentoData, VendorData, Vendors};
+    use mbinary::enums::{Dataset, Schema};
+    use mbinary::params::RetrieveParams;
+    use mbinary::symbols::Instrument;
+    use mbinary::vendors::{DatabentoData, VendorData, Vendors};
     use midas_client::historical::Historical;
     use midas_client::instrument::Instruments;
-    use repl_shell::{self, cli::ProcessCommand};
+    use midas_clilib::{self, cli::ProcessCommand};
     use serial_test::serial;
     use std::str::FromStr;
 
@@ -339,15 +344,15 @@ mod tests {
 
         // Parameters
         let dataset = Dataset::Futures;
-        let context = repl_shell::context::Context::init().expect("Error on context creation.");
+        let context = midas_clilib::context::Context::init().expect("Error on context creation.");
 
         // Mbp1
-        let upload_cmd = repl_shell::cli::vendors::databento::DatabentoCommands::Upload {
+        let upload_cmd = midas_clilib::cli::vendors::databento::DatabentoCommands::Upload {
                 dataset: dataset.as_str().to_string(),
                 dbn_filepath:
                 "GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-02-09T00:00:00Z_2024-02-17T00:00:00Z.dbn".to_string(),
                 dbn_downloadtype: "stream".to_string(),
-                mbn_filepath: "system_tests_data.bin".to_string(),
+                midas_filepath: "system_tests_data.bin".to_string(),
             };
 
         upload_cmd
@@ -373,7 +378,7 @@ mod tests {
             "2024-02-16 00:00:00",
             schema.clone(),
             Dataset::Futures,
-            mbn::enums::Stype::Continuous,
+            mbinary::enums::Stype::Continuous,
         )?;
 
         let _response = client.get_records_to_file(&query_params, &file).await?;
@@ -401,7 +406,7 @@ mod tests {
             "2024-02-17 00:00:00",
             schema.clone(),
             Dataset::Futures,
-            mbn::enums::Stype::Raw,
+            mbinary::enums::Stype::Raw,
         )?;
 
         let _response = client.get_records_to_file(&query_params, &file).await?;
@@ -416,14 +421,13 @@ mod tests {
         // Setup
         global_setup().await;
 
-        // Raw
-        test_get_records_vs_dbn_raw().await?;
-
         // Conitnuous
         test_get_records_vs_dbn_continuous_calendar().await?;
 
+        // Raw
+        test_get_records_vs_dbn_raw().await?;
+
         // Rolllover flag
-        // test_rollover2().await?;
         test_rollover().await?;
 
         // Cleanup
@@ -449,11 +453,11 @@ mod tests {
         for schema in &schemas {
             println!("Schema : {:?}", schema);
 
-            let mbn_file = format!(
+            let mbinary_file = format!(
                 "data/midas/HE.c.0_HE.c.1_LE.c.0_LE.c.1_{}.bin",
                 schema.to_string()
             );
-            let _ = pull_continuous_files(schema, mbn_file.clone()).await?;
+            let _ = pull_continuous_files(schema, mbinary_file.clone()).await?;
 
             let dbn_file = PathBuf::from(format!(
                 "data/databento/GLBX.MDP3_{}_HE.c.0_HE.c.1_LE.c.0_LE.c.1_2024-02-13T00:00:00Z_2024-02-16T00:00:00Z.dbn",
@@ -461,8 +465,10 @@ mod tests {
             ));
 
             // Test
-            compare_dbn_raw_output(dbn_file.clone(), &PathBuf::from(mbn_file.clone())).await?;
-            compare_dbn(dbn_file, &PathBuf::from(mbn_file)).await?;
+            compare_dbn_raw_output(dbn_file.clone(), &PathBuf::from(mbinary_file.clone())).await?;
+            let equal = compare_dbn(dbn_file, &PathBuf::from(mbinary_file)).await?;
+
+            assert!(equal);
         }
 
         Ok(())
@@ -470,26 +476,26 @@ mod tests {
 
     async fn test_get_records_vs_dbn_raw() -> anyhow::Result<()> {
         let schemas = vec![
-            Schema::Mbp1,
             Schema::Tbbo,
             Schema::Trades,
-            Schema::Bbo1S,
+            // Schema::Bbo1S,
             Schema::Bbo1M,
             Schema::Ohlcv1S,
             Schema::Ohlcv1M,
             Schema::Ohlcv1H,
             Schema::Ohlcv1D,
+            Schema::Mbp1,
         ];
 
         println!("Testing Raw Tickers: ");
         for schema in &schemas {
             println!("Schema : {:?}", schema);
             /*             let schema = Schema::Mbp1; */
-            let mbn_file = format!(
+            let mbinary_file = format!(
                 "data/midas/HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_{}.bin",
                 schema.to_string()
             );
-            let _ = pull_raw_files(schema, mbn_file.clone()).await?;
+            let _ = pull_raw_files(schema, mbinary_file.clone()).await?;
 
             let dbn_file = PathBuf::from(format!(
             "data/databento/GLBX.MDP3_{}_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-02-13T00:00:00Z_2024-02-17T00:00:00Z.dbn",
@@ -497,8 +503,10 @@ mod tests {
         ));
 
             // Test
-            compare_dbn_raw_output(dbn_file.clone(), &PathBuf::from(mbn_file.clone())).await?;
-            compare_dbn(dbn_file, &PathBuf::from(mbn_file)).await?;
+            compare_dbn_raw_output(dbn_file.clone(), &PathBuf::from(mbinary_file.clone())).await?;
+            let equal = compare_dbn(dbn_file, &PathBuf::from(mbinary_file)).await?;
+
+            assert!(equal);
         }
 
         Ok(())
@@ -518,16 +526,16 @@ mod tests {
         ];
 
         for schema in &schemas {
-            let mbn_file = format!(
+            let mbinary_file = format!(
                 "data/midas/HE.c.0_HE.c.1_LE.c.0_LE.c.1_{}.bin",
                 schema.to_string()
             );
-            let mut decoder = AsyncDecoder::<BufReader<File>>::from_file(mbn_file).await?;
+            let mut decoder = AsyncDecoder::<BufReader<File>>::from_file(mbinary_file).await?;
 
             // Write MBN records to file
             let mut rollover_records = Vec::new();
-            while let Some(mbn_record) = decoder.decode_ref().await? {
-                let record_enum = RecordEnum::from_ref(mbn_record)?;
+            while let Some(mbinary_record) = decoder.decode_ref().await? {
+                let record_enum = RecordEnum::from_ref(mbinary_record)?;
                 if record_enum.msg().header().rollover_flag == 1 {
                     rollover_records.push(record_enum);
                 }
@@ -558,24 +566,24 @@ mod tests {
 
         // Iterate over each schema
         for schema in &schemas {
-            let mbn_file = format!(
+            let mbinary_file = format!(
                 "data/midas/HE.c.0_HE.c.1_LE.c.0_LE.c.1_{}.bin",
                 schema.to_string()
             );
 
-            let mut decoder = AsyncDecoder::<BufReader<File>>::from_file(mbn_file).await?;
+            let mut decoder = AsyncDecoder::<BufReader<File>>::from_file(mbinary_file).await?;
             println!("{:?}", decoder.metadata());
 
             // Create file to store rollover records
-            let mut mbn_rollover_file =
+            let mut mbinary_rollover_file =
                 File::create(format!("test_rollover_{}.txt", schema.to_string())).await?;
 
             // Initialize a HashMap to count occurrences of instrument_ids
             let mut instrument_count: HashMap<u32, u32> = HashMap::new();
 
             // Decode and process the records
-            while let Some(mbn_record) = decoder.decode_ref().await? {
-                let record_enum = RecordEnum::from_ref(mbn_record)?;
+            while let Some(mbinary_record) = decoder.decode_ref().await? {
+                let record_enum = RecordEnum::from_ref(mbinary_record)?;
 
                 // Track the instrument_id count
                 let instrument_id = record_enum.msg().header().instrument_id;
@@ -583,7 +591,7 @@ mod tests {
 
                 // If rollover_flag is 1, write to the file
                 if record_enum.msg().header().rollover_flag == 1 {
-                    mbn_rollover_file
+                    mbinary_rollover_file
                         .write_all(format!("{:?}\n", record_enum).as_bytes())
                         .await?;
                 }

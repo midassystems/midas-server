@@ -1,5 +1,5 @@
 use crate::Result;
-use mbn::enums::Dataset;
+use mbinary::enums::Dataset;
 use sqlx::Column;
 use sqlx::{PgPool, Row};
 

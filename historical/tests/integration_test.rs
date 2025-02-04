@@ -7,17 +7,17 @@ use axum::{
 use historical::{database::init::init_db, response::ApiResponse, router::router};
 use hyper::body::to_bytes;
 use hyper::body::HttpBody as _;
-use mbn::encode::CombinedEncoder;
-use mbn::metadata::Metadata;
-use mbn::params::RetrieveParams;
-use mbn::symbols::SymbolMap;
-use mbn::vendors::Vendors;
-use mbn::vendors::{DatabentoData, VendorData};
-use mbn::{
+use mbinary::encode::CombinedEncoder;
+use mbinary::metadata::Metadata;
+use mbinary::params::RetrieveParams;
+use mbinary::symbols::SymbolMap;
+use mbinary::vendors::Vendors;
+use mbinary::vendors::{DatabentoData, VendorData};
+use mbinary::{
     enums::{Dataset, Schema, Stype},
     symbols::Instrument,
 };
-use mbn::{
+use mbinary::{
     record_ref::RecordRef,
     records::{BidAskPair, Mbp1Msg, RecordHeader},
 };

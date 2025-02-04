@@ -4,7 +4,7 @@ use crate::Result;
 use axum::response::IntoResponse;
 use axum::{body::StreamBody, Extension, Json};
 use axum::{routing::get, Router};
-use mbn::params::RetrieveParams;
+use mbinary::params::RetrieveParams;
 use retriever::RecordGetter;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -37,15 +37,15 @@ mod test {
     use axum::response::IntoResponse;
     use axum::{Extension, Json};
     use hyper::body::HttpBody as _;
-    use mbn::encode::CombinedEncoder;
-    use mbn::enums::Dataset;
-    use mbn::metadata::Metadata;
-    use mbn::record_enum::RecordEnum;
-    use mbn::record_ref::RecordRef;
-    use mbn::symbols::SymbolMap;
-    use mbn::vendors::Vendors;
-    use mbn::vendors::{DatabentoData, VendorData};
-    use mbn::{
+    use mbinary::encode::CombinedEncoder;
+    use mbinary::enums::Dataset;
+    use mbinary::metadata::Metadata;
+    use mbinary::record_enum::RecordEnum;
+    use mbinary::record_ref::RecordRef;
+    use mbinary::symbols::SymbolMap;
+    use mbinary::vendors::Vendors;
+    use mbinary::vendors::{DatabentoData, VendorData};
+    use mbinary::{
         decode::Decoder,
         enums::{Schema, Stype},
         records::{BidAskPair, Mbp1Msg, RecordHeader},

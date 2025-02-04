@@ -1,6 +1,6 @@
 use crate::Result;
 use async_trait::async_trait;
-use mbn::{
+use mbinary::{
     enums::Dataset,
     records::{BidAskPair, Mbp1Msg},
 };
@@ -293,15 +293,15 @@ impl RecordInsertQueries for Mbp1Msg {
 mod test {
     use super::*;
     use crate::database::init::init_db;
-    use mbn::decode::RecordDecoder;
-    use mbn::encode::RecordEncoder;
-    use mbn::enums::{Action, Dataset, Side};
-    use mbn::record_enum::RecordEnum;
-    use mbn::record_ref::RecordRef;
-    use mbn::records::{BidAskPair, Mbp1Msg, RecordHeader};
-    use mbn::symbols::Instrument;
-    use mbn::vendors::Vendors;
-    use mbn::vendors::{DatabentoData, VendorData};
+    use mbinary::decode::RecordDecoder;
+    use mbinary::encode::RecordEncoder;
+    use mbinary::enums::{Action, Dataset, Side};
+    use mbinary::record_enum::RecordEnum;
+    use mbinary::record_ref::RecordRef;
+    use mbinary::records::{BidAskPair, Mbp1Msg, RecordHeader};
+    use mbinary::symbols::Instrument;
+    use mbinary::vendors::Vendors;
+    use mbinary::vendors::{DatabentoData, VendorData};
     use serial_test::serial;
     use sqlx::{postgres::PgPoolOptions, PgPool, Postgres, Transaction};
     use std::fs::File;

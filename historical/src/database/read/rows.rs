@@ -1,7 +1,7 @@
 use crate::Result;
-use mbn::enums::RType;
-use mbn::record_enum::RecordEnum;
-use mbn::records::{BboMsg, BidAskPair, Mbp1Msg, OhlcvMsg, RecordHeader, TbboMsg, TradeMsg};
+use mbinary::enums::RType;
+use mbinary::record_enum::RecordEnum;
+use mbinary::records::{BboMsg, BidAskPair, Mbp1Msg, OhlcvMsg, RecordHeader, TbboMsg, TradeMsg};
 use sqlx::Row;
 use std::os::raw::c_char;
 

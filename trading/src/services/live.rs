@@ -8,7 +8,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::{Extension, Json, Router};
-use mbn::live::LiveData;
+use mbinary::live::LiveData;
 use sqlx::PgPool;
 use std::collections::hash_map::HashMap;
 use tracing::{error, info};

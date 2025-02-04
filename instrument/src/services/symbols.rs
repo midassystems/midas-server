@@ -8,9 +8,9 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post, put};
 use axum::{Extension, Json, Router};
-use mbn::enums::Dataset;
-use mbn::symbols::Instrument;
-use mbn::vendors::Vendors;
+use mbinary::enums::Dataset;
+use mbinary::symbols::Instrument;
+use mbinary::vendors::Vendors;
 use sqlx::PgPool;
 use tracing::{error, info};
 
@@ -209,7 +209,7 @@ mod test {
     use super::*;
     use crate::database::init::init_db;
     use hyper::body::to_bytes;
-    use mbn::vendors::{DatabentoData, VendorData};
+    use mbinary::vendors::{DatabentoData, VendorData};
     use regex::Regex;
     use serde::de::DeserializeOwned;
     use serial_test::serial;
