@@ -188,7 +188,8 @@ mod tests {
 
     async fn create_tickers() -> anyhow::Result<()> {
         dotenv().ok();
-        let base_url = std::env::var("INSTRUMENT_URL").expect("Expected database_url.");
+
+        let base_url = "http://127.0.0.1:8082";
         let client = Instruments::new(&base_url);
 
         let schema = dbn::Schema::from_str("mbp-1")?;
@@ -313,7 +314,8 @@ mod tests {
     /// Deletes the tickers created during setup
     async fn teardown_tickers() -> anyhow::Result<()> {
         dotenv().ok();
-        let base_url = std::env::var("INSTRUMENT_URL").expect("Expected INSTRUMENT_URL.");
+
+        let base_url = "http://127.0.0.1:8082";
         let client = Instruments::new(&base_url);
 
         let tickers_to_delete = vec![
@@ -364,7 +366,7 @@ mod tests {
     async fn pull_continuous_files(schema: &Schema, file: String) -> anyhow::Result<()> {
         dotenv().ok();
 
-        let base_url = std::env::var("HISTORICAL_URL").expect("Expected database_url.");
+        let base_url = "http://127.0.0.1:8080";
         let client = Historical::new(&base_url);
 
         let query_params = RetrieveParams::new(
@@ -389,7 +391,7 @@ mod tests {
     async fn pull_raw_files(schema: &Schema, file: String) -> anyhow::Result<()> {
         dotenv().ok();
 
-        let base_url = std::env::var("HISTORICAL_URL").expect("Expected database_url.");
+        let base_url = "http://127.0.0.1:8080";
         let client = Historical::new(&base_url);
 
         let query_params = RetrieveParams::new(
@@ -454,7 +456,7 @@ mod tests {
             println!("Schema : {:?}", schema);
 
             let mbinary_file = format!(
-                "data/midas/HE.c.0_HE.c.1_LE.c.0_LE.c.1_{}.bin",
+                "data/HE.c.0_HE.c.1_LE.c.0_LE.c.1_{}.bin",
                 schema.to_string()
             );
             let _ = pull_continuous_files(schema, mbinary_file.clone()).await?;
@@ -492,7 +494,7 @@ mod tests {
             println!("Schema : {:?}", schema);
             /*             let schema = Schema::Mbp1; */
             let mbinary_file = format!(
-                "data/midas/HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_{}.bin",
+                "data/HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_{}.bin",
                 schema.to_string()
             );
             let _ = pull_raw_files(schema, mbinary_file.clone()).await?;
@@ -527,7 +529,7 @@ mod tests {
 
         for schema in &schemas {
             let mbinary_file = format!(
-                "data/midas/HE.c.0_HE.c.1_LE.c.0_LE.c.1_{}.bin",
+                "data/HE.c.0_HE.c.1_LE.c.0_LE.c.1_{}.bin",
                 schema.to_string()
             );
             let mut decoder = AsyncDecoder::<BufReader<File>>::from_file(mbinary_file).await?;
@@ -567,7 +569,7 @@ mod tests {
         // Iterate over each schema
         for schema in &schemas {
             let mbinary_file = format!(
-                "data/midas/HE.c.0_HE.c.1_LE.c.0_LE.c.1_{}.bin",
+                "data/HE.c.0_HE.c.1_LE.c.0_LE.c.1_{}.bin",
                 schema.to_string()
             );
 

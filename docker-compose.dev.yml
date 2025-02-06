@@ -1,34 +1,50 @@
 services:
-  migrate-database:
+  dev-postgres:
+    image: postgres:14
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - dev_postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+    networks:
+      - app-network
+    restart: always
+
+  dev-migrate-database:
     build:
       context: .
       dockerfile: ./database/Dockerfile
-    env_file:
-      - .env
-    profiles:
-      - prod
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password 
+      POSTGRES_HOST: dev-postgres 
+      HISTORICAL_DATABASE_URL: postgres://postgres:password@dev-postgres:5432/market_data
+      TRADING_DATABASE_URL: postgres://postgres:password@dev-postgres:5432/trading_data
+    depends_on:
+      - dev-postgres  # Ensure PostgreSQL is ready first
     command: >
       sh -c "
-              /app/scripts/init-db.sh &&
               /app/scripts/migrate-db.sh historical && 
               /app/scripts/migrate-db.sh trading
             "
+    networks:
+      - app-network
+
   # Historical service
-  historical-service: 
+  dev-historical-service: 
     build:
       context: .
       dockerfile: "./historical/Dockerfile"
     environment:
-      HISTORICAL_DATABASE_URL: ${HISTORICAL_DATABASE_URL} 
-      HISTORICAL_PORT: ${HISTORICAL_PORT}
+      HISTORICAL_DATABASE_URL: postgres://postgres:password@dev-postgres:5432/market_data
+      HISTORICAL_PORT: "8080"
       LOG_FILE: /app/logs/historical.log
       LOG_LEVEL: info
-    profiles:
-      - prod  
     depends_on:
-      - migrate-database
+      - dev-migrate-database
     ports:
-      - "${HISTORICAL_PORT}:${HISTORICAL_PORT}"  
+      - "8080:8080"  
     volumes:
       - data:/app/data
       - logs:/app/logs
@@ -39,21 +55,19 @@ services:
     restart: always
 
   # Trading service
-  trading-service: 
+  dev-trading-service: 
     build:
       context: .
       dockerfile: "./trading/Dockerfile"
     environment:
-      TRADING_DATABASE_URL: ${TRADING_DATABASE_URL}
-      TRADING_PORT: ${TRADING_PORT}
+      TRADING_DATABASE_URL: postgres://postgres:password@dev-postgres:5432/trading_data
+      TRADING_PORT: "8081" 
       LOG_FILE: /app/logs/trading.log
       LOG_LEVEL: info
-    profiles:
-      - prod  
     depends_on:
-      - migrate-database
+      - dev-migrate-database
     ports:
-      - "${TRADING_PORT}:${TRADING_PORT}"  
+      - "8081:8081"  
     volumes:
       - data:/app/data
       - logs:/app/logs
@@ -65,21 +79,19 @@ services:
 
 
   # Instrument service
-  instrument-service: 
+  dev-instrument-service: 
     build:
       context: .
       dockerfile: "./instrument/Dockerfile"
     environment:
-      INSTRUMENT_DATABASE_URL: ${INSTRUMENT_DATABASE_URL}
-      INSTRUMENT_PORT: ${INSTRUMENT_PORT}
+      INSTRUMENT_DATABASE_URL: postgres://postgres:password@dev-postgres:5432/market_data
+      INSTRUMENT_PORT: "8082" 
       LOG_FILE: /app/logs/instrument.log
       LOG_LEVEL: info
-    profiles:
-      - prod  
     depends_on:
-      - migrate-database
+      - dev-migrate-database
     ports:
-      - "${INSTRUMENT_PORT}:${INSTRUMENT_PORT}"  
+      - "8082:8082"  
     volumes:
       - data:/app/data
       - logs:/app/logs
@@ -99,18 +111,26 @@ volumes:
     driver_opts:
       o: bind
       type: none
-      device: ${LOG_DIR} 
+      device: ./logs 
   data:
     driver: local
     driver_opts:
       o: bind
       type: none
-      device: ${DATA_DIR}  
+      device: ./data   
   scripts:
     driver: local
     driver_opts:
       o: bind
       type: none
-      device: ${SCRIPTS_DIR}
+      device: ./scripts
+  dev_postgres_data:
+    driver: local
+    driver_opts:
+      o: bind
+      type: none
+      device: ./postgres/data  
+
+
 
 

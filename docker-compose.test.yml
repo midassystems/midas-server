@@ -11,7 +11,7 @@ services:
     ports:
       - "5433:5432"  # Avoid conflicts with production
     networks:
-      - app-network
+      - test-app-network
 
   test-migrate-database:
     build:
@@ -30,10 +30,10 @@ services:
              /app/scripts/migrate-db.sh trading
             "
     networks:
-      - app-network
+      - test-app-network
 
 networks:
-  app-network:
+  test-app-network:
     driver: bridge
 
 volumes:

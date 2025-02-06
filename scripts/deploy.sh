@@ -37,7 +37,7 @@ if [[ "$ENV" == "dev" ]]; then
 	mkdir -p postgres/data
 
 	# Development deployment (most basic)
-	if docker compose --env-file .env --profile dev up --build -d; then
+	if docker compose -f docker-compose.dev.yml up -d; then
 		echo "Docker Compose deployment for development succeeded."
 	else
 		echo "Docker Compose deployment for development failed."
@@ -47,7 +47,7 @@ elif [[ "$ENV" == "prod" ]]; then
 	# Production deployment
 	# if docker compose --env-file .env --profile dev up --build -d; then
 
-	if docker compose --profile prod up --build -d; then
+	if docker compose --env-file .env --profile prod up --build -d; then
 		echo "Docker Compose deployment for production succeeded."
 	else
 		echo "Docker Compose deployment for production failed."

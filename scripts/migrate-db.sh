@@ -1,7 +1,5 @@
 #!/bin/bash
 
-echo "Waiting for PostgreSQL to be ready..."
-
 # Wait for PostgreSQL service to be ready
 until pg_isready -h "$POSTGRES_HOST" -U "$POSTGRES_USER"; do
 	echo "PostgreSQL is not ready yet. Retrying in 2 seconds..."
@@ -28,7 +26,6 @@ fi
 DATABASE=$1
 
 if [ "$DATABASE" == "trading" ]; then
-	echo "TRADING_DATABASE_URL: $TRADING_DATABASE_URL"
 	cd database/trading || exit 1
 	DATABASE_URL=$TRADING_DATABASE_URL sqlx migrate run
 	if [ $? -ne 0 ]; then
@@ -39,7 +36,6 @@ if [ "$DATABASE" == "trading" ]; then
 	fi
 
 elif [ "$DATABASE" == "historical" ]; then
-	echo "HISTORICAL_DATABASE_URL: $HISTORICAL_DATABASE_URL"
 	cd database/historical || exit 2
 	DATABASE_URL=$HISTORICAL_DATABASE_URL sqlx migrate run
 	if [ $? -ne 0 ]; then
