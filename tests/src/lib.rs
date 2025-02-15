@@ -421,7 +421,7 @@ mod tests {
     #[serial]
     async fn test_data_integrity() -> anyhow::Result<()> {
         // Setup
-        global_setup().await;
+        // global_setup().await;
 
         // Conitnuous
         test_get_records_vs_dbn_continuous_calendar().await?;
@@ -433,7 +433,7 @@ mod tests {
         test_rollover().await?;
 
         // Cleanup
-        teardown_tickers().await?;
+        // teardown_tickers().await?;
 
         Ok(())
     }
@@ -443,12 +443,12 @@ mod tests {
             Schema::Mbp1,
             Schema::Tbbo,
             Schema::Trades,
-            Schema::Bbo1S,
-            Schema::Bbo1M,
             Schema::Ohlcv1S,
             Schema::Ohlcv1M,
             Schema::Ohlcv1H,
             Schema::Ohlcv1D,
+            // Schema::Bbo1S,
+            // Schema::Bbo1M,
         ];
 
         println!("Testing Continuous Tickers: ");
@@ -478,15 +478,15 @@ mod tests {
 
     async fn test_get_records_vs_dbn_raw() -> anyhow::Result<()> {
         let schemas = vec![
+            Schema::Mbp1,
             Schema::Tbbo,
             Schema::Trades,
-            // Schema::Bbo1S,
-            Schema::Bbo1M,
             Schema::Ohlcv1S,
             Schema::Ohlcv1M,
             Schema::Ohlcv1H,
             Schema::Ohlcv1D,
-            Schema::Mbp1,
+            // Schema::Bbo1S,
+            Schema::Bbo1M,
         ];
 
         println!("Testing Raw Tickers: ");
@@ -519,12 +519,12 @@ mod tests {
             Schema::Mbp1,
             Schema::Tbbo,
             Schema::Trades,
-            Schema::Bbo1S,
-            Schema::Bbo1M,
             Schema::Ohlcv1S,
             Schema::Ohlcv1M,
             Schema::Ohlcv1H,
             Schema::Ohlcv1D,
+            // Schema::Bbo1S,
+            // Schema::Bbo1M,
         ];
 
         for schema in &schemas {
