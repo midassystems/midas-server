@@ -662,7 +662,7 @@ pub const FUTURES_MBP1_CONTINUOUS_VOLUME_QUERY: &str = r#"
         FROM futures_mbp m
         INNER JOIN futures i ON m.instrument_id = i.instrument_id
         WHERE m.ts_recv BETWEEN $1 AND $2
-        AND i.ticker = ANY($3)
+        AND i.ticker LIKE ANY($3)
         AND m.action = 84  -- Filter only trades 
     ),
     aggregated_data AS (
@@ -692,7 +692,7 @@ pub const FUTURES_MBP1_CONTINUOUS_VOLUME_QUERY: &str = r#"
             instrument_id,
             daily_volume,
             expiration_date,
-            RANK() OVER (PARTITION BY LEFT(ticker, 2), ts_event ORDER BY daily_volume DESC) AS rank 
+            RANK() OVER (PARTITION BY LEFT(ticker, 2), ts_event ORDER BY daily_volume DESC) - 1 AS rank 
         FROM daily_volumes
     ),
     start_end_schedule AS (
@@ -778,7 +778,7 @@ pub const FUTURES_TRADE_CONTINUOUS_VOLUME_QUERY: &str = r#"
         FROM futures_mbp m
         INNER JOIN futures i ON m.instrument_id = i.instrument_id
         WHERE m.ts_recv BETWEEN $1 AND $2
-        AND i.ticker = ANY($3)
+        AND i.ticker LIKE ANY($3)
         AND m.action = 84  -- Filter only trades 
     ),
     aggregated_data AS (
@@ -808,7 +808,7 @@ pub const FUTURES_TRADE_CONTINUOUS_VOLUME_QUERY: &str = r#"
             instrument_id,
             daily_volume,
             expiration_date,
-            RANK() OVER (PARTITION BY LEFT(ticker, 2), ts_event ORDER BY daily_volume DESC) AS rank 
+            RANK() OVER (PARTITION BY LEFT(ticker, 2), ts_event ORDER BY daily_volume DESC) - 1 AS rank 
         FROM daily_volumes
     ),
     start_end_schedule AS (
@@ -885,7 +885,7 @@ pub const FUTURES_OHLCV_CONTINUOUS_VOLUME_QUERY: &str = r#"
         FROM futures_mbp m
         INNER JOIN futures i ON m.instrument_id = i.instrument_id
         WHERE m.ts_recv BETWEEN $1 AND $2
-        AND i.ticker = ANY($4)
+        AND i.ticker LIKE ANY($4)
         AND m.action = 84  -- Filter only trades 
     ),
     aggregated_data AS (
@@ -915,7 +915,7 @@ pub const FUTURES_OHLCV_CONTINUOUS_VOLUME_QUERY: &str = r#"
             instrument_id,
             daily_volume,
             expiration_date,
-            RANK() OVER (PARTITION BY LEFT(ticker, 2), ts_event ORDER BY daily_volume DESC) AS rank 
+            RANK() OVER (PARTITION BY LEFT(ticker, 2), ts_event ORDER BY daily_volume DESC) - 1 AS rank 
         FROM daily_volumes
     ),
     start_end_schedule AS (
@@ -1015,7 +1015,7 @@ pub const FUTURES_BBO_CONTINUOUS_VOLUME_QUERY: &str = r#"
         FROM futures_mbp m
         INNER JOIN futures i ON m.instrument_id = i.instrument_id
         WHERE m.ts_recv BETWEEN $1 AND $2
-        AND i.ticker = ANY($4)
+        AND i.ticker LIKE ANY($4)
         AND m.action = 84  -- Filter only trades 
     ),
     aggregated_data AS (
@@ -1045,7 +1045,7 @@ pub const FUTURES_BBO_CONTINUOUS_VOLUME_QUERY: &str = r#"
             instrument_id,
             daily_volume,
             expiration_date,
-            RANK() OVER (PARTITION BY LEFT(ticker, 2), ts_event ORDER BY daily_volume DESC) AS rank 
+            RANK() OVER (PARTITION BY LEFT(ticker, 2), ts_event ORDER BY daily_volume DESC) - 1 AS rank 
         FROM daily_volumes
     ),
     start_end_schedule AS (

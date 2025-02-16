@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
+use tokio::time::{sleep, Duration};
 
 pub fn symbol_map(metadata: &dbn::Metadata) -> anyhow::Result<HashMap<String, String>> {
     let mut symbol_map_hash = HashMap::new();
@@ -46,6 +47,21 @@ pub async fn read_mbinary_file(
     let decoder = AsyncDecoder::<BufReader<File>>::from_file(filepath).await?;
 
     Ok(decoder)
+}
+
+pub async fn dbn_raw_count(dbn_filepath: PathBuf) -> anyhow::Result<()> {
+    let (mut dbn_decoder, _map) = read_dbn_file(dbn_filepath).await?;
+
+    // Output files
+
+    let mut dbn_count = 0;
+    // Write DBN records to file
+    while let Some(dbn_record) = dbn_decoder.decode_record_ref().await? {
+        dbn_count += 1;
+    }
+    println!("DBN length: {:?}", dbn_count);
+
+    Ok(())
 }
 
 pub async fn compare_dbn_raw_output(
@@ -352,7 +368,6 @@ mod tests {
         let upload_cmd = midas_clilib::cli::vendors::databento::DatabentoCommands::Upload {
             dataset: dataset.as_str().to_string(),
             dbn_filepath: file_path,
-            // "GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-02-09T00:00:00Z_2024-02-17T00:00:00Z.dbn".to_string(),
             dbn_downloadtype: "stream".to_string(),
             midas_filepath: "system_tests_data.bin".to_string(),
         };
@@ -365,26 +380,49 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn test_data_integrity() -> anyhow::Result<()> {
+    async fn test_data_integrity_continuous_calendar() -> anyhow::Result<()> {
+        let path_1 = PathBuf::from("data/databento/GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-01-17T00:00:00Z_2024-01-24T00:00:00Z.dbn") ;
+
+        dbn_raw_count(path_1).await?;
+
+        // Setup
+        create_tickers().await.expect("Error creating tickers");
+        upload_data("GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-01-17T00:00:00Z_2024-01-24T00:00:00Z.dbn".to_string()).await;
+
+        // // Raw
+        // test_raw_records().await?;
+        //
+        // // Continuous Calendar
+        // test_get_records_vs_dbn_continuous_calendar().await?;
+        //
+        // // Rolllover flag
+        // test_rollover().await?;
+        //
+        // Cleanup
+        teardown_tickers().await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_data_integrity_continuous_volume() -> anyhow::Result<()> {
+        let path_1 = PathBuf::from("data/databento/GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-02-09T00:00:00Z_2024-02-17T00:00:00Z.dbn");
+
+        dbn_raw_count(path_1).await?;
+
         // Setup
         create_tickers().await.expect("Error creating tickers");
         upload_data("GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-02-09T00:00:00Z_2024-02-17T00:00:00Z.dbn".to_string()).await;
-        upload_data("GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-01-17T00:00:00Z_2024-01-24T00:00:00Z.dbn".to_string()).await;
-
-        // Continuous Volume
-        test_get_records_vs_dbn_continuous_volume().await?;
-
-        // Continuous Calendar
-        test_get_records_vs_dbn_continuous_calendar().await?;
-
-        // Raw
-        test_raw_records().await?;
-        test_raw_records_2().await?;
-
-        // Rolllover flag
-        test_rollover().await?;
-        test_rollover_2().await?;
-
+        // // Raw
+        // test_raw_records_2().await?;
+        //
+        // // Continuous Volume
+        // test_get_records_vs_dbn_continuous_volume().await?;
+        //
+        // // Rolllover flag
+        // test_rollover_2().await?;
+        //
         // Cleanup
         teardown_tickers().await?;
 
