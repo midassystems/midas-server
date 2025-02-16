@@ -711,7 +711,7 @@ pub const FUTURES_MBP1_CONTINUOUS_VOLUME_QUERY: &str = r#"
         THEN $2
         ELSE LEAST(
           rv.expiration_date,
-          LEAD(rv.ts_event) OVER (PARTITION BY LEFT(rv.ticker, 2), rv.rank ORDER BY rv.ts_event), $2)
+          COALESCE(LEAD(rv.ts_event) OVER (PARTITION BY LEFT(rv.ticker, 2), rv.rank ORDER BY rv.ts_event), $2)) - 1
         END AS end_time,
         rv.daily_volume,
         rv.rank
@@ -841,7 +841,7 @@ pub const FUTURES_TRADE_CONTINUOUS_VOLUME_QUERY: &str = r#"
             MAX(end_time) AS end_time,
             rank
         FROM start_end_schedule
-        WHERE rank = $5
+        WHERE rank = $4
         GROUP BY ticker, instrument_id, rank
     ),
     linear_trades AS (
@@ -872,7 +872,7 @@ pub const FUTURES_TRADE_CONTINUOUS_VOLUME_QUERY: &str = r#"
             AND m.action = 84 -- Filter only trades
     )
     SELECT *
-    FROM linear_mbp
+    FROM linear_trades
     ORDER BY ts_recv
 "#;
 
@@ -967,14 +967,14 @@ pub const FUTURES_OHLCV_CONTINUOUS_VOLUME_QUERY: &str = r#"
                 ORDER BY m.ts_recv DESC, m.ctid DESC
             ) AS reverse_row_number,
             CASE 
-                WHEN LAG(rs.current_instrument_id) OVER (PARTITION BY LEFT(rs.ticker, 2) ORDER BY m.ts_recv) IS DISTINCT FROM rs.current_instrument_id
+                WHEN LAG(rs.instrument_id) OVER (PARTITION BY LEFT(rs.ticker, 2) ORDER BY m.ts_recv) IS DISTINCT FROM rs.instrument_id
                      AND ROW_NUMBER() OVER (PARTITION BY LEFT(rs.ticker, 2) ORDER BY m.ts_recv) > 1
                 THEN 1
                 ELSE 0
             END AS rollover_flag -- Detect rollover
         FROM futures_mbp m
         INNER JOIN rolling_schedule rs
-            ON m.instrument_id = rs.current_instrument_id
+            ON m.instrument_id = rs.instrument_id
             AND m.ts_recv BETWEEN rs.start_time AND rs.end_time
             AND m.action = 84 -- Only trades
     ),

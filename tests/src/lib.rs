@@ -71,6 +71,7 @@ pub async fn compare_dbn_raw_output(
     let mut mbinary_decoder = read_mbinary_file(mbinary_filepath).await?;
     let (mut dbn_decoder, _map) = read_dbn_file(dbn_filepath).await?;
 
+    println!("{:?}", mbinary_decoder.metadata());
     // Output files
     let mbinary_output_file = "raw_mbinary_records.txt";
     let dbn_output_file = "raw_dbn_records.txt";
@@ -380,24 +381,39 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn test_data_integrity_continuous_calendar() -> anyhow::Result<()> {
+    async fn test_data_integrity_continuous_volume() -> anyhow::Result<()> {
         let path_1 = PathBuf::from("data/databento/GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-01-17T00:00:00Z_2024-01-24T00:00:00Z.dbn") ;
 
         dbn_raw_count(path_1).await?;
 
         // Setup
         create_tickers().await.expect("Error creating tickers");
-        upload_data("GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-01-17T00:00:00Z_2024-01-24T00:00:00Z.dbn".to_string()).await;
+        // Parameters
+        let dataset = Dataset::Futures;
+        let context = midas_clilib::context::Context::init().expect("Error on context creation.");
 
-        // // Raw
-        // test_raw_records().await?;
-        //
-        // // Continuous Calendar
-        // test_get_records_vs_dbn_continuous_calendar().await?;
-        //
-        // // Rolllover flag
-        // test_rollover().await?;
-        //
+        // Mbp1
+        let upload_cmd = midas_clilib::cli::vendors::databento::DatabentoCommands::Upload {
+            dataset: dataset.as_str().to_string(),
+            dbn_filepath: "GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-01-17T00:00:00Z_2024-01-24T00:00:00Z.dbn".to_string(), 
+            dbn_downloadtype: "stream".to_string(),
+            midas_filepath: "system_tests_data.bin".to_string(),
+        };
+
+        upload_cmd
+            .process_command(&context)
+            .await
+            .expect("Error on upload.");
+
+        // Raw
+        test_raw_records_volume().await?;
+
+        // Continuous Calendar
+        test_continuous_volume().await?;
+
+        // Rolllover flag
+        test_rollover_volume().await?;
+
         // Cleanup
         teardown_tickers().await?;
 
@@ -406,23 +422,41 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn test_data_integrity_continuous_volume() -> anyhow::Result<()> {
+    // #[ignore]
+    async fn test_data_integrity_continuous_calendar() -> anyhow::Result<()> {
         let path_1 = PathBuf::from("data/databento/GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-02-09T00:00:00Z_2024-02-17T00:00:00Z.dbn");
 
         dbn_raw_count(path_1).await?;
 
         // Setup
         create_tickers().await.expect("Error creating tickers");
-        upload_data("GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-02-09T00:00:00Z_2024-02-17T00:00:00Z.dbn".to_string()).await;
-        // // Raw
-        // test_raw_records_2().await?;
-        //
-        // // Continuous Volume
-        // test_get_records_vs_dbn_continuous_volume().await?;
-        //
-        // // Rolllover flag
-        // test_rollover_2().await?;
-        //
+
+        // Parameters
+        let dataset = Dataset::Futures;
+        let context = midas_clilib::context::Context::init().expect("Error on context creation.");
+
+        // Mbp1
+        let upload_cmd = midas_clilib::cli::vendors::databento::DatabentoCommands::Upload {
+            dataset: dataset.as_str().to_string(),
+            dbn_filepath: "GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-02-09T00:00:00Z_2024-02-17T00:00:00Z.dbn".to_string(),
+            dbn_downloadtype: "stream".to_string(),
+            midas_filepath: "system_tests_data2.bin".to_string(),
+        };
+
+        upload_cmd
+            .process_command(&context)
+            .await
+            .expect("Error on upload.");
+
+        // Raw
+        test_raw_records_calendar().await?;
+
+        // Continuous Volume
+        test_continuous_calendar().await?;
+
+        // Rolllover flag
+        test_rollover_calendar().await?;
+
         // Cleanup
         teardown_tickers().await?;
 
@@ -512,7 +546,7 @@ mod tests {
         Ok(())
     }
 
-    async fn test_get_records_vs_dbn_continuous_volume() -> anyhow::Result<()> {
+    async fn test_continuous_volume() -> anyhow::Result<()> {
         let schemas = vec![
             Schema::Mbp1,
             Schema::Tbbo,
@@ -550,7 +584,7 @@ mod tests {
         Ok(())
     }
 
-    async fn test_get_records_vs_dbn_continuous_calendar() -> anyhow::Result<()> {
+    async fn test_continuous_calendar() -> anyhow::Result<()> {
         let schemas = vec![
             Schema::Mbp1,
             Schema::Tbbo,
@@ -588,7 +622,7 @@ mod tests {
         Ok(())
     }
 
-    async fn test_raw_records() -> anyhow::Result<()> {
+    async fn test_raw_records_calendar() -> anyhow::Result<()> {
         let schemas = vec![
             Schema::Mbp1,
             Schema::Tbbo,
@@ -629,7 +663,7 @@ mod tests {
 
         Ok(())
     }
-    async fn test_raw_records_2() -> anyhow::Result<()> {
+    async fn test_raw_records_volume() -> anyhow::Result<()> {
         let schemas = vec![
             Schema::Mbp1,
             Schema::Tbbo,
@@ -671,7 +705,7 @@ mod tests {
         Ok(())
     }
 
-    async fn test_rollover() -> anyhow::Result<()> {
+    async fn test_rollover_calendar() -> anyhow::Result<()> {
         let schemas = vec![
             Schema::Mbp1,
             Schema::Tbbo,
@@ -704,7 +738,7 @@ mod tests {
 
         Ok(())
     }
-    async fn test_rollover_2() -> anyhow::Result<()> {
+    async fn test_rollover_volume() -> anyhow::Result<()> {
         let schemas = vec![
             Schema::Mbp1,
             Schema::Tbbo,
@@ -732,6 +766,7 @@ mod tests {
                     rollover_records.push(record_enum);
                 }
             }
+            println!("{:?}", rollover_records);
             assert_eq!(rollover_records.len(), 2);
         }
 
