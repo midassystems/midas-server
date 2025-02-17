@@ -25,9 +25,36 @@ use tokio::io::AsyncWrite;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum ContinuousKind {
+    Volume,
+    Calendar,
+    None,
+}
+
+impl ContinuousKind {
+    fn from_str(s: &str) -> Self {
+        match s {
+            "c" => return ContinuousKind::Calendar,
+            "v" => return ContinuousKind::Volume,
+            _ => return ContinuousKind::None,
+        }
+    }
+}
+
+impl std::fmt::Display for ContinuousKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ContinuousKind::Calendar => write!(f, "c"),
+            ContinuousKind::Volume => write!(f, "v"),
+            ContinuousKind::None => write!(f, "none"),
+        }
+    }
+}
+
 pub struct ContinuousMap {
     pub id_map: HashMap<i32, HashMap<String, u32>>,
-    pub type_map: HashMap<String, HashMap<i32, Vec<String>>>,
+    pub type_map: HashMap<ContinuousKind, HashMap<i32, Vec<String>>>,
 }
 
 impl ContinuousMap {
@@ -47,7 +74,7 @@ impl ContinuousMap {
                     if let Ok(rank) = rank_str.parse::<i32>() {
                         // Insert into the nested HashMap
                         self.type_map
-                            .entry(kind.to_string()) // "c" or "v"
+                            .entry(ContinuousKind::from_str(kind)) // "c" or "v"
                             .or_insert_with(HashMap::new)
                             .entry(rank) // rank (e.g., 1, 2, 3)
                             .or_insert_with(Vec::new)
@@ -189,7 +216,8 @@ impl RecordGetter {
         let rtype = RType::from(retrieve_params.rtype().unwrap());
         let from_row_fn = get_from_row_fn(rtype);
 
-        let mut cursor = RecordEnum::retrieve_query(&self.pool, retrieve_params).await?;
+        let mut cursor =
+            RecordEnum::retrieve_query(&self.pool, retrieve_params, &ContinuousKind::None).await?;
         info!("Processing queried records.");
 
         while let Some(row_result) = cursor.next().await {
@@ -353,7 +381,7 @@ impl RecordGetter {
                 retrieve_params.symbols = tickers.clone();
 
                 let mut cursor =
-                    RecordEnum::retrieve_query(&self.pool, retrieve_params.clone()).await?;
+                    RecordEnum::retrieve_query(&self.pool, retrieve_params.clone(), kind).await?;
 
                 while let Some(row_result) = cursor.next().await {
                     match row_result {
@@ -668,7 +696,8 @@ mod test {
 
         // Validate
         let expected = HashMap::from([(
-            "c".to_string(),
+            // "c".to_string(),
+            ContinuousKind::Calendar,
             HashMap::from([
                 (1, vec!["HE.c.1".to_string(), "LE.c.1".to_string()]),
                 (0, vec!["HE.c.0".to_string(), "LE.c.0".to_string()]),
