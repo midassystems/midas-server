@@ -156,7 +156,7 @@ impl QueryParams for RetrieveParams {
 pub trait RecordsQuery {
     async fn retrieve_query(
         pool: &PgPool,
-        mut params: RetrieveParams,
+        params: &RetrieveParams,
         continuous_kind: &ContinuousKind,
     ) -> Result<
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
@@ -167,14 +167,14 @@ pub trait RecordsQuery {
 impl RecordsQuery for Mbp1Msg {
     async fn retrieve_query(
         pool: &PgPool,
-        mut params: RetrieveParams,
+        params: &RetrieveParams,
         continuous_kind: &ContinuousKind,
     ) -> Result<
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     > {
         // Parameters
-        let _ = params.interval_adjust_ts_start()?;
-        let _ = params.interval_adjust_ts_end()?;
+        // let _ = params.interval_adjust_ts_start()?;
+        // let _ = params.interval_adjust_ts_end()?;
         let tbbo_flag = params.schema == Schema::Tbbo;
         let symbol_array = params.symbols_array();
         let rank = params.rank();
@@ -204,14 +204,14 @@ impl RecordsQuery for Mbp1Msg {
 impl RecordsQuery for TradeMsg {
     async fn retrieve_query(
         pool: &PgPool,
-        mut params: RetrieveParams,
+        params: &RetrieveParams,
         continuous_kind: &ContinuousKind,
     ) -> Result<
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     > {
         // Parameters
-        let _ = params.interval_adjust_ts_start()?;
-        let _ = params.interval_adjust_ts_end()?;
+        // let _ = params.interval_adjust_ts_start()?;
+        // let _ = params.interval_adjust_ts_end()?;
         let symbol_array = params.symbols_array();
         // let num_symbols = symbol_array.len() as i32;
         let rank = params.rank();
@@ -239,14 +239,14 @@ impl RecordsQuery for TradeMsg {
 impl RecordsQuery for BboMsg {
     async fn retrieve_query(
         pool: &PgPool,
-        mut params: RetrieveParams,
+        params: &RetrieveParams,
         continuous_kind: &ContinuousKind,
     ) -> Result<
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     > {
         // Parameters
-        let _ = params.interval_adjust_ts_start()?;
-        let _ = params.interval_adjust_ts_end()?;
+        // let _ = params.interval_adjust_ts_start()?;
+        // let _ = params.interval_adjust_ts_end()?;
         let interval_ns = params.schema_interval()?;
         let symbol_array = params.symbols_array();
         // let num_symbols = symbol_array.len() as i32;
@@ -276,14 +276,14 @@ impl RecordsQuery for BboMsg {
 impl RecordsQuery for OhlcvMsg {
     async fn retrieve_query(
         pool: &PgPool,
-        mut params: RetrieveParams,
+        params: &RetrieveParams,
         continuous_kind: &ContinuousKind,
     ) -> Result<
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     > {
         // Parameters
-        let _ = params.interval_adjust_ts_start()?;
-        let _ = params.interval_adjust_ts_end()?;
+        // let _ = params.interval_adjust_ts_start()?;
+        // let _ = params.interval_adjust_ts_end()?;
         let interval_ns = params.schema_interval()?;
         let symbol_array = params.symbols_array();
         // let num_symbols = symbol_array.len() as i32;
@@ -311,7 +311,7 @@ impl RecordsQuery for OhlcvMsg {
 impl RecordsQuery for RecordEnum {
     async fn retrieve_query(
         pool: &PgPool,
-        params: RetrieveParams,
+        params: &RetrieveParams,
         continuous_kind: &ContinuousKind,
     ) -> Result<
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
@@ -528,7 +528,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = Mbp1Msg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = Mbp1Msg::retrieve_query(&pool, &query_params, &ContinuousKind::None)
             .await
             .expect("Error on retrieve records.");
 
@@ -660,7 +660,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = TbboMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = TbboMsg::retrieve_query(&pool, &query_params, &ContinuousKind::None)
             .await
             .expect("Error on retrieve records.");
 
@@ -792,7 +792,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = TradeMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = TradeMsg::retrieve_query(&pool, &query_params, &ContinuousKind::None)
             .await
             .expect("Error on retrieve records.");
 
@@ -924,7 +924,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = BboMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = BboMsg::retrieve_query(&pool, &query_params, &ContinuousKind::None)
             .await
             .expect("Error on retrieve records.");
 
@@ -1078,7 +1078,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = OhlcvMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = OhlcvMsg::retrieve_query(&pool, &query_params, &ContinuousKind::None)
             .await
             .expect("Error on retrieve records.");
 
@@ -1212,7 +1212,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = Mbp1Msg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = Mbp1Msg::retrieve_query(&pool, &query_params, &ContinuousKind::None)
             .await
             .expect("Error on retrieve records.");
 
@@ -1343,7 +1343,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = TbboMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = TbboMsg::retrieve_query(&pool, &query_params, &ContinuousKind::None)
             .await
             .expect("Error on retrieve records.");
 
@@ -1474,7 +1474,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = TradeMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = TradeMsg::retrieve_query(&pool, &query_params, &ContinuousKind::None)
             .await
             .expect("Error on retrieve records.");
 
@@ -1605,7 +1605,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = BboMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = BboMsg::retrieve_query(&pool, &query_params, &ContinuousKind::None)
             .await
             .expect("Error on retrieve records.");
 
@@ -1759,7 +1759,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = OhlcvMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = OhlcvMsg::retrieve_query(&pool, &query_params, &ContinuousKind::None)
             .await
             .expect("Error on retrieve records.");
 
@@ -1892,7 +1892,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = Mbp1Msg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = Mbp1Msg::retrieve_query(&pool, &query_params, &ContinuousKind::None)
             .await
             .expect("Error on retrieve records.");
 
@@ -2023,7 +2023,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = TbboMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = TbboMsg::retrieve_query(&pool, &query_params, &ContinuousKind::None)
             .await
             .expect("Error on retrieve records.");
 
@@ -2154,7 +2154,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = TradeMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = TradeMsg::retrieve_query(&pool, &query_params, &ContinuousKind::None)
             .await
             .expect("Error on retrieve records.");
 
@@ -2285,7 +2285,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = BboMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = BboMsg::retrieve_query(&pool, &query_params, &ContinuousKind::None)
             .await
             .expect("Error on retrieve records.");
 
@@ -2439,7 +2439,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = OhlcvMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = OhlcvMsg::retrieve_query(&pool, &query_params, &ContinuousKind::None)
             .await
             .expect("Error on retrieve records.");
 
@@ -2573,7 +2573,7 @@ mod test {
             stype: Stype::Continuous,
         };
 
-        let mut cursor = Mbp1Msg::retrieve_query(&pool, query_params, &ContinuousKind::Calendar)
+        let mut cursor = Mbp1Msg::retrieve_query(&pool, &query_params, &ContinuousKind::Calendar)
             .await
             .expect("Error on retrieve records.");
 
@@ -2704,7 +2704,7 @@ mod test {
             stype: Stype::Continuous,
         };
 
-        let mut cursor = Mbp1Msg::retrieve_query(&pool, query_params, &ContinuousKind::Volume)
+        let mut cursor = Mbp1Msg::retrieve_query(&pool, &query_params, &ContinuousKind::Volume)
             .await
             .expect("Error on retrieve records.");
 

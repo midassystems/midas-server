@@ -183,41 +183,11 @@ impl RecordGetter {
         })
     }
 
-    // -- Raw Symbols
-    pub async fn process_metadata(&self) -> Result<Cursor<Vec<u8>>> {
-        let mut metadata_cursor = Cursor::new(Vec::new());
-        let mut metadata_encoder = MetadataEncoder::new(&mut metadata_cursor);
-
-        let retrieve_params = self.retrieve_params.lock().await.clone();
-
-        let symbol_map = query_symbols_map(
-            &self.pool,
-            &retrieve_params.symbols,
-            retrieve_params.dataset,
-        )
-        .await?;
-
-        let metadata = Metadata::new(
-            retrieve_params.schema,
-            retrieve_params.dataset,
-            retrieve_params.start_ts as u64,
-            retrieve_params.end_ts as u64,
-            symbol_map,
-        );
-        metadata_encoder.encode_metadata(&metadata)?;
-
-        Ok(metadata_cursor)
-    }
-
-    pub async fn process_records(self: Arc<Self>) -> Result<()> {
-        // Clone the parameters to avoid locking or mutability issues
-        let retrieve_params = self.retrieve_params.lock().await.clone();
-
-        let rtype = RType::from(retrieve_params.rtype().unwrap());
+    pub async fn get_records(&self, params: &RetrieveParams, kind: &ContinuousKind) -> Result<()> {
+        let rtype = RType::from(params.rtype().unwrap());
         let from_row_fn = get_from_row_fn(rtype);
 
-        let mut cursor =
-            RecordEnum::retrieve_query(&self.pool, retrieve_params, &ContinuousKind::None).await?;
+        let mut cursor = RecordEnum::retrieve_query(&self.pool, params, kind).await?;
         info!("Processing queried records.");
 
         while let Some(row_result) = cursor.next().await {
@@ -244,6 +214,81 @@ impl RecordGetter {
                 }
             }
         }
+        Ok(())
+    }
+
+    // -- Raw Symbols
+    pub async fn process_metadata(&self) -> Result<Cursor<Vec<u8>>> {
+        let mut metadata_cursor = Cursor::new(Vec::new());
+        let mut metadata_encoder = MetadataEncoder::new(&mut metadata_cursor);
+
+        let retrieve_params: RetrieveParams = self.retrieve_params.lock().await.clone();
+
+        let symbol_map = query_symbols_map(
+            &self.pool,
+            &retrieve_params.symbols,
+            retrieve_params.dataset,
+        )
+        .await?;
+
+        let metadata = Metadata::new(
+            retrieve_params.schema,
+            retrieve_params.dataset,
+            retrieve_params.start_ts as u64,
+            retrieve_params.end_ts as u64,
+            symbol_map,
+        );
+        metadata_encoder.encode_metadata(&metadata)?;
+
+        Ok(metadata_cursor)
+    }
+
+    pub async fn process_records(self: Arc<Self>) -> Result<()> {
+        // Clone the parameters to avoid locking or mutability issues
+        let mut params = self.retrieve_params.lock().await.clone();
+
+        // Adjust start/ end to be star  end of repective interval
+        let _ = params.interval_adjust_ts_start()?;
+        let _ = params.interval_adjust_ts_end()?;
+        let final_end = params.end_ts;
+
+        while (final_end - params.start_ts) > 86_400_000_000_001 {
+            params.end_ts = params.start_ts + 86_400_000_000_000;
+            self.get_records(&params, &ContinuousKind::None).await?;
+            params.start_ts = params.end_ts;
+        }
+
+        params.end_ts = final_end;
+        self.get_records(&params, &ContinuousKind::None).await?;
+
+        // let mut cursor =
+        //     RecordEnum::retrieve_query(&self.pool, &params, &ContinuousKind::None).await?;
+        // info!("Processing queried records.");
+        //
+        // while let Some(row_result) = cursor.next().await {
+        //     match row_result {
+        //         Ok(row) => {
+        //             // Use the from_row_fn here
+        //             let record = from_row_fn(&row, None)?;
+        //
+        //             // Convert to RecordEnum and add to encoder
+        //             let record_ref = record.to_record_ref();
+        //             self.encoder
+        //                 .lock()
+        //                 .await
+        //                 .encode_record(&record_ref)
+        //                 .await
+        //                 .unwrap();
+        //
+        //             // Increment the batch counter
+        //             *self.batch_counter.lock().await += 1;
+        //         }
+        //         Err(e) => {
+        //             error!("Error processing row: {:?}", e);
+        //             return Err(e.into());
+        //         }
+        //     }
+        // }
         *self.end_records.lock().await = true;
 
         Ok(())
@@ -364,10 +409,15 @@ impl RecordGetter {
 
     pub async fn process_continuous_records(self: Arc<Self>) -> Result<()> {
         // Clone the parameters to avoid locking or mutability issues
-        let mut retrieve_params = self.retrieve_params.lock().await.clone();
-        let rtype = RType::from(retrieve_params.rtype().unwrap());
+        let mut params = self.retrieve_params.lock().await.clone();
+        let rtype = RType::from(params.rtype().unwrap());
 
         let from_row_fn = get_from_row_fn(rtype);
+
+        let _ = params.interval_adjust_ts_start()?;
+        let _ = params.interval_adjust_ts_end()?;
+        let final_end = params.end_ts;
+
         let continuous_map = self.continuous_map.lock().await; // Clone to avoid holding the lock
 
         for (kind, rank_map) in continuous_map.type_map.iter() {
@@ -378,10 +428,9 @@ impl RecordGetter {
                     kind, rank, tickers
                 );
 
-                retrieve_params.symbols = tickers.clone();
+                params.symbols = tickers.clone();
 
-                let mut cursor =
-                    RecordEnum::retrieve_query(&self.pool, retrieve_params.clone(), kind).await?;
+                let mut cursor = RecordEnum::retrieve_query(&self.pool, &params, kind).await?;
 
                 while let Some(row_result) = cursor.next().await {
                     match row_result {
