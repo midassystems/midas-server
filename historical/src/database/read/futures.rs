@@ -180,6 +180,141 @@ pub const FUTURES_BBO_QUERY: &str = r#"
     WHERE fp.ts_recv BETWEEN $1 AND ($2 - $3)
     ORDER BY fp.ts_recv
     "#;
+pub const FUTURES_CONTINUOUS_CALENDAR: &str = r#"
+    WITH active_contracts AS (
+        SELECT
+            ticker,
+            instrument_id,
+            expiration_date,
+            ROW_NUMBER() OVER (
+                PARTITION BY LEFT(ticker, 2)
+                ORDER BY expiration_date
+            ) - 1 AS rank
+        FROM futures
+        WHERE ticker LIKE ANY('{HE%, LE%}')
+          AND expiration_date >=  1705536000000000000 -- start
+          AND first_available <=  1706054400000000000 -- end
+    ),
+    shifted_schedule AS (
+        SELECT
+            LEAD(ticker, shift_param.rank_shift) OVER (
+                PARTITION BY LEFT(ticker, 2)
+                ORDER BY rank
+            ) AS ticker,
+            LEAD(instrument_id, shift_param.rank_shift) OVER (
+                PARTITION BY LEFT(ticker, 2)
+                ORDER BY rank
+            ) AS instrument_id,
+            ROW_NUMBER() OVER (
+                PARTITION BY LEFT(ticker, 2)
+                ORDER BY rank
+            ) -1 AS rank, -- Dynamically calculate the shifted rank
+            COALESCE(
+                LAG(
+                    CASE
+                        -- Handle subsequent contracts
+                        WHEN CEIL(expiration_date / 86400000000000.0) * 86400000000000 > 1705622400000000000  
+                        THEN 1705622400000000000 
+                        ELSE CEIL(expiration_date / 86400000000000.0) * 86400000000000
+                    END
+                ) OVER (PARTITION BY LEFT(ticker, 2) ORDER BY rank),
+                -- Align start to the user's request for the first contract, without skipping the partial day
+                CASE
+                    WHEN rank = 0 THEN  1705536000000000000-- Use the exact start time for the first contract
+                    ELSE CEIL(1705536000000000000 / 86400000000000.0) * 86400000000000 
+                END
+            ) AS start_time,
+            CASE
+              WHEN CEIL(expiration_date / 86400000000000.0) * 86400000000000 - 1 > 1705622400000000000 
+              THEN 1705622400000000000 
+              ELSE CEIL(expiration_date / 86400000000000.0) * 86400000000000 - 1
+            END AS end_time
+        FROM active_contracts
+        CROSS JOIN LATERAL (
+            SELECT 0 AS rank_shift
+        ) AS shift_param
+    )
+    Select * from shifted_schedule
+    WHERE rank = 0;
+"#;
+
+pub const FUTURES_CONTINUOUS_VOLUME: &str = r#"
+    WITH ordered_data AS (
+        SELECT
+            m.instrument_id,
+            m.ts_recv,
+            m.size
+        FROM futures_mbp m
+        INNER JOIN futures i ON m.instrument_id = i.instrument_id
+        WHERE m.ts_recv BETWEEN 1705536000000000000 AND 1706054400000000000
+        AND i.ticker LIKE ANY('{HE%, LE%}')
+        AND m.action = 84  -- Filter only trades 
+    ),
+    aggregated_data AS (
+        SELECT
+            instrument_id,
+            floor(ts_recv / 86400000000000) * 86400000000000 AS ts_event, -- Maintain nanoseconds
+            SUM(size) AS volume
+        FROM ordered_data
+        GROUP BY
+            instrument_id,
+            floor(ts_recv / 86400000000000) * 86400000000000
+    ),
+    daily_volumes AS (
+        SELECT 
+            i.ticker, 
+            a.instrument_id,
+            CAST(a.ts_event AS BIGINT) AS ts_event, -- Explicitly cast to BIGINT to avoid scientific notation
+            a.volume AS daily_volume, -- Keep daily volume for each day
+            i.expiration_date 
+        FROM aggregated_data a
+        INNER JOIN futures i ON a.instrument_id = i.instrument_id
+    ),
+    ranked_volumes AS (
+        SELECT 
+            ticker,
+            ts_event,
+            instrument_id,
+            daily_volume,
+            expiration_date,
+            RANK() OVER (PARTITION BY LEFT(ticker, 2), ts_event ORDER BY daily_volume DESC) - 1 AS rank 
+        FROM daily_volumes
+    ),
+    start_end_schedule AS (
+        SELECT 
+        rv.ticker,
+        rv.instrument_id,
+        rv.ts_event AS start_time,
+        CASE 
+        WHEN rv.rank = (
+          SELECT MAX(r2.rank) 
+          FROM ranked_volumes r2
+          WHERE LEFT(r2.ticker, 2) = LEFT(rv.ticker, 2)
+          AND r2.ts_event = rv.ts_event
+          )
+        AND rv.expiration_date > 1706054400000000000 
+        THEN 1706054400000000000
+        ELSE LEAST(
+          rv.expiration_date,
+          COALESCE(LEAD(rv.ts_event) OVER (PARTITION BY LEFT(rv.ticker, 2), rv.rank ORDER BY rv.ts_event), 1706054400000000000)) - 1
+        END AS end_time,
+        rv.daily_volume,
+        rv.rank
+        FROM ranked_volumes rv
+    ),
+    rolling_schedule AS (
+        SELECT
+            ticker,
+            instrument_id,
+            rank,
+            MIN(start_time) AS start_time,
+            MAX(end_time) AS end_time
+        FROM start_end_schedule
+        WHERE rank = 0
+        GROUP BY ticker, instrument_id, rank
+    )
+    select * from rolling_schedule;
+"#;
 
 pub const FUTURES_MBP1_CONTINUOUS_QUERY: &str = r#"
     WITH active_contracts AS (

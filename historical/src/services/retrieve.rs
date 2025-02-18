@@ -19,10 +19,13 @@ pub async fn get_records(
     Extension(pool): Extension<PgPool>,
     Json(params): Json<RetrieveParams>,
 ) -> Result<impl IntoResponse> {
-    info!("Handling request to get records.");
+    info!(
+        "Retrieving {:?} records for symbols: {:?} start: {:?} end: {:?} ",
+        params.schema, params.symbols, params.start_ts, params.end_ts
+    );
 
     // Initialize the loader
-    let loader = Arc::new(RecordGetter::new(1000, params, pool).await?);
+    let loader = Arc::new(RecordGetter::new(1000000, params, pool).await?);
     let progress_stream = loader.stream().await;
 
     Ok(StreamBody::new(progress_stream))

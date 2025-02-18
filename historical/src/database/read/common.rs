@@ -19,7 +19,6 @@ use mbinary::record_enum::RecordEnum;
 use mbinary::records::{BboMsg, Mbp1Msg, OhlcvMsg, TbboMsg, TradeMsg};
 use sqlx::PgPool;
 use std::pin::Pin;
-use tracing::info;
 
 pub enum QueryType {
     Mbp,
@@ -88,45 +87,6 @@ impl QueryType {
     }
 }
 
-// impl QueryType {
-//     fn get_query(self, dataset: Dataset, stype: Stype) -> &'static str {
-//         match self {
-//             QueryType::Mbp => match dataset {
-//                 Dataset::Futures => match stype {
-//                     Stype::Continuous => FUTURES_MBP1_CONTINUOUS_QUERY,
-//                     Stype::Raw => FUTURES_MBP1_QUERY,
-//                 },
-//                 Dataset::Equities => EQUITIES_MBP1_QUERY,
-//                 Dataset::Option => OPTION_MBP1_QUERY,
-//             },
-//             QueryType::Trade => match dataset {
-//                 Dataset::Futures => match stype {
-//                     Stype::Continuous => FUTURES_TRADE_CONTINUOUS_QUERY,
-//                     Stype::Raw => FUTURES_TRADE_QUERY,
-//                 },
-//                 Dataset::Equities => EQUITIES_TRADE_QUERY,
-//                 Dataset::Option => OPTION_TRADE_QUERY,
-//             },
-//             QueryType::Ohlcv => match dataset {
-//                 Dataset::Futures => match stype {
-//                     Stype::Continuous => FUTURES_OHLCV_CONTINUOUS_QUERY,
-//                     Stype::Raw => FUTURES_OHLCV_QUERY,
-//                 },
-//                 Dataset::Equities => EQUITIES_OHLCV_QUERY,
-//                 Dataset::Option => OPTION_OHLCV_QUERY,
-//             },
-//             QueryType::Bbo => match dataset {
-//                 Dataset::Futures => match stype {
-//                     Stype::Continuous => FUTURES_BBO_CONTINUOUS_QUERY,
-//                     Stype::Raw => FUTURES_BBO_QUERY,
-//                 },
-//                 Dataset::Equities => EQUITIES_BBO_QUERY,
-//                 Dataset::Option => OPTION_BBO_QUERY,
-//             },
-//         }
-//     }
-// }
-
 pub trait QueryParams {
     fn symbols_array(&self) -> Vec<String>;
     fn rank(&self) -> i32;
@@ -173,17 +133,9 @@ impl RecordsQuery for Mbp1Msg {
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     > {
         // Parameters
-        // let _ = params.interval_adjust_ts_start()?;
-        // let _ = params.interval_adjust_ts_end()?;
         let tbbo_flag = params.schema == Schema::Tbbo;
         let symbol_array = params.symbols_array();
         let rank = params.rank();
-        // let num_symbols = symbol_array.len() as i32;
-
-        info!(
-            "Retrieving {:?} records for symbols: {:?} start: {:?} end: {:?} tbbo_flag {:?}",
-            params.schema, params.symbols, params.start_ts, params.end_ts, tbbo_flag
-        );
 
         // Execute continuous query
         let cursor =
@@ -194,7 +146,6 @@ impl RecordsQuery for Mbp1Msg {
                 .bind(tbbo_flag)
                 .bind(rank)
                 .fetch(pool);
-        // .bind(num_symbols)
 
         Ok(cursor)
     }
@@ -210,16 +161,8 @@ impl RecordsQuery for TradeMsg {
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     > {
         // Parameters
-        // let _ = params.interval_adjust_ts_start()?;
-        // let _ = params.interval_adjust_ts_end()?;
         let symbol_array = params.symbols_array();
-        // let num_symbols = symbol_array.len() as i32;
         let rank = params.rank();
-
-        info!(
-            "Retrieving {:?} records for symbols: {:?} start: {:?} end: {:?} ",
-            params.schema, params.symbols, params.start_ts, params.end_ts
-        );
 
         // Execute the query with parameters, including LIMIT and OFFSET
         let cursor =
@@ -230,7 +173,6 @@ impl RecordsQuery for TradeMsg {
                 .bind(rank)
                 .fetch(pool);
 
-        // .bind(num_symbols)
         Ok(cursor)
     }
 }
@@ -245,17 +187,9 @@ impl RecordsQuery for BboMsg {
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     > {
         // Parameters
-        // let _ = params.interval_adjust_ts_start()?;
-        // let _ = params.interval_adjust_ts_end()?;
         let interval_ns = params.schema_interval()?;
         let symbol_array = params.symbols_array();
-        // let num_symbols = symbol_array.len() as i32;
         let rank = params.rank();
-
-        info!(
-            "Retrieving {:?} records for symbols: {:?} start: {:?} end: {:?} ",
-            params.schema, params.symbols, params.start_ts, params.end_ts
-        );
 
         // Construct the SQL query with a join and additional filtering by symbols
         let cursor =
@@ -267,7 +201,6 @@ impl RecordsQuery for BboMsg {
                 .bind(rank)
                 .fetch(pool);
 
-        // .bind(num_symbols)
         Ok(cursor)
     }
 }
@@ -282,17 +215,9 @@ impl RecordsQuery for OhlcvMsg {
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     > {
         // Parameters
-        // let _ = params.interval_adjust_ts_start()?;
-        // let _ = params.interval_adjust_ts_end()?;
         let interval_ns = params.schema_interval()?;
         let symbol_array = params.symbols_array();
-        // let num_symbols = symbol_array.len() as i32;
         let rank = params.rank();
-
-        info!(
-            "Retrieving {:?} records for symbols: {:?} start: {:?} end: {:?} ",
-            params.schema, symbol_array, params.start_ts, params.end_ts
-        );
 
         let cursor =
             sqlx::query(QueryType::Ohlcv.get_query(params.dataset, params.stype, continuous_kind))
@@ -300,7 +225,6 @@ impl RecordsQuery for OhlcvMsg {
                 .bind(params.end_ts)
                 .bind(interval_ns)
                 .bind(symbol_array)
-                // .bind(num_symbols)
                 .bind(rank)
                 .fetch(pool);
 

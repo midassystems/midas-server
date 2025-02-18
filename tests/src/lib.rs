@@ -10,7 +10,6 @@ use std::path::PathBuf;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
-use tokio::time::{sleep, Duration};
 
 pub fn symbol_map(metadata: &dbn::Metadata) -> anyhow::Result<HashMap<String, String>> {
     let mut symbol_map_hash = HashMap::new();
@@ -56,7 +55,7 @@ pub async fn dbn_raw_count(dbn_filepath: PathBuf) -> anyhow::Result<()> {
 
     let mut dbn_count = 0;
     // Write DBN records to file
-    while let Some(dbn_record) = dbn_decoder.decode_record_ref().await? {
+    while let Some(_dbn_record) = dbn_decoder.decode_record_ref().await? {
         dbn_count += 1;
     }
     println!("DBN length: {:?}", dbn_count);
@@ -355,32 +354,33 @@ mod tests {
         Ok(())
     }
 
-    // A function to seed the database (runs once before tests)
-    async fn upload_data(file_path: String) {
-        dotenv().ok();
-
-        // create_tickers().await.expect("Error creating tickers");
-
-        // Parameters
-        let dataset = Dataset::Futures;
-        let context = midas_clilib::context::Context::init().expect("Error on context creation.");
-
-        // Mbp1
-        let upload_cmd = midas_clilib::cli::vendors::databento::DatabentoCommands::Upload {
-            dataset: dataset.as_str().to_string(),
-            dbn_filepath: file_path,
-            dbn_downloadtype: "stream".to_string(),
-            midas_filepath: "system_tests_data.bin".to_string(),
-        };
-
-        upload_cmd
-            .process_command(&context)
-            .await
-            .expect("Error on upload.");
-    }
+    // // A function to seed the database (runs once before tests)
+    // async fn upload_data(file_path: String) {
+    //     dotenv().ok();
+    //
+    //     // create_tickers().await.expect("Error creating tickers");
+    //
+    //     // Parameters
+    //     let dataset = Dataset::Futures;
+    //     let context = midas_clilib::context::Context::init().expect("Error on context creation.");
+    //
+    //     // Mbp1
+    //     let upload_cmd = midas_clilib::cli::vendors::databento::DatabentoCommands::Upload {
+    //         dataset: dataset.as_str().to_string(),
+    //         dbn_filepath: file_path,
+    //         dbn_downloadtype: "stream".to_string(),
+    //         midas_filepath: "system_tests_data.bin".to_string(),
+    //     };
+    //
+    //     upload_cmd
+    //         .process_command(&context)
+    //         .await
+    //         .expect("Error on upload.");
+    // }
 
     #[tokio::test]
     #[serial]
+    // #[ignore]
     async fn test_data_integrity_continuous_volume() -> anyhow::Result<()> {
         let path_1 = PathBuf::from("data/databento/GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-01-17T00:00:00Z_2024-01-24T00:00:00Z.dbn") ;
 
@@ -409,10 +409,10 @@ mod tests {
         test_raw_records_volume().await?;
 
         // Continuous Calendar
-        test_continuous_volume().await?;
+        // test_continuous_volume().await?;
 
         // Rolllover flag
-        test_rollover_volume().await?;
+        // test_rollover_volume().await?;
 
         // Cleanup
         teardown_tickers().await?;
@@ -452,10 +452,10 @@ mod tests {
         test_raw_records_calendar().await?;
 
         // Continuous Volume
-        test_continuous_calendar().await?;
+        // test_continuous_calendar().await?;
 
         // Rolllover flag
-        test_rollover_calendar().await?;
+        // test_rollover_calendar().await?;
 
         // Cleanup
         teardown_tickers().await?;

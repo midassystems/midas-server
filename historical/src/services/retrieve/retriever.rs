@@ -188,7 +188,7 @@ impl RecordGetter {
         let from_row_fn = get_from_row_fn(rtype);
 
         let mut cursor = RecordEnum::retrieve_query(&self.pool, params, kind).await?;
-        info!("Processing queried records.");
+        // info!("Processing queried records.");
 
         while let Some(row_result) = cursor.next().await {
             match row_result {
@@ -344,7 +344,7 @@ impl RecordGetter {
                         Bytes::copy_from_slice(cursor.get_ref())
                     };
 
-                    info!("Sending buffer, size: {:?}", batch_bytes.len());
+                    // info!("Sending buffer, size: {:?}", batch_bytes.len());
                     yield Ok::<Bytes, Error>(batch_bytes);
 
                     // Reset cursor and batch counter
@@ -359,13 +359,13 @@ impl RecordGetter {
                 drop(batch_counter);
                 drop(end_records);
 
-                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
             }
 
             // Send any remaining data that wasn't part of a full batch
             if !self.cursor.lock().await.get_ref().is_empty() {
                 let remaining_bytes = Bytes::copy_from_slice(self.cursor.lock().await.get_ref());
-                info!("Sending remaining buffer, size: {:?}", remaining_bytes.len());
+                // info!("Sending remaining buffer, size: {:?}", remaining_bytes.len());
                 yield Ok::<Bytes, Error>(remaining_bytes);
             }
 
@@ -407,18 +407,10 @@ impl RecordGetter {
         Ok(metadata_cursor)
     }
 
-    pub async fn process_continuous_records(self: Arc<Self>) -> Result<()> {
-        // Clone the parameters to avoid locking or mutability issues
-        let mut params = self.retrieve_params.lock().await.clone();
-        let rtype = RType::from(params.rtype().unwrap());
-
-        let from_row_fn = get_from_row_fn(rtype);
-
-        let _ = params.interval_adjust_ts_start()?;
-        let _ = params.interval_adjust_ts_end()?;
-        let final_end = params.end_ts;
-
+    pub async fn get_records_continuous(&self, mut params: RetrieveParams) -> Result<()> {
         let continuous_map = self.continuous_map.lock().await; // Clone to avoid holding the lock
+        let rtype = RType::from(params.rtype().unwrap());
+        let from_row_fn = get_from_row_fn(rtype);
 
         for (kind, rank_map) in continuous_map.type_map.iter() {
             let mut count = 0;
@@ -463,6 +455,74 @@ impl RecordGetter {
                 info!("Count of records processed {}", count);
             }
         }
+        Ok(())
+    }
+
+    pub async fn process_continuous_records(self: Arc<Self>) -> Result<()> {
+        // Clone the parameters to avoid locking or mutability issues
+        let mut params = self.retrieve_params.lock().await.clone();
+        // let rtype = RType::from(params.rtype().unwrap());
+
+        // let from_row_fn = get_from_row_fn(rtype);
+
+        let _ = params.interval_adjust_ts_start()?;
+        let _ = params.interval_adjust_ts_end()?;
+        let final_end = params.end_ts;
+
+        while (final_end - params.start_ts) > 86_400_000_000_001 {
+            params.end_ts = params.start_ts + 86_400_000_000_000;
+            self.get_records_continuous(params.clone()).await?;
+            params.start_ts = params.end_ts;
+        }
+
+        params.end_ts = final_end;
+        self.get_records_continuous(params.clone()).await?;
+
+        // let continuous_map = self.continuous_map.lock().await; // Clone to avoid holding the lock
+
+        // for (kind, rank_map) in continuous_map.type_map.iter() {
+        //     let mut count = 0;
+        //     for (rank, tickers) in rank_map {
+        //         info!(
+        //             "Processing kind: {}, rank: {}, tickers: {:?}",
+        //             kind, rank, tickers
+        //         );
+        //
+        //         params.symbols = tickers.clone();
+        //
+        //         let mut cursor = RecordEnum::retrieve_query(&self.pool, &params, kind).await?;
+        //
+        //         while let Some(row_result) = cursor.next().await {
+        //             match row_result {
+        //                 Ok(row) => {
+        //                     let ticker: String = row.try_get("ticker")?;
+        //                     let new_id = continuous_map.get_id(&ticker, *rank);
+        //
+        //                     // Use the from_row_fn here
+        //                     let record = from_row_fn(&row, new_id)?;
+        //
+        //                     // Convert to RecordEnum and add to encoder
+        //                     let record_ref = record.to_record_ref();
+        //                     self.encoder
+        //                         .lock()
+        //                         .await
+        //                         .encode_record(&record_ref)
+        //                         .await
+        //                         .unwrap();
+        //                     count += 1;
+        //
+        //                     // Increment the batch counter
+        //                     *self.batch_counter.lock().await += 1;
+        //                 }
+        //                 Err(e) => {
+        //                     error!("Error processing row: {:?}", e);
+        //                     return Err(e.into());
+        //                 }
+        //             }
+        //         }
+        //         info!("Count of records processed {}", count);
+        //     }
+        // }
         *self.end_records.lock().await = true;
 
         Ok(())
