@@ -1,6 +1,26 @@
 pub const FUTURES_MBP1_QUERY: &str = r#"
-    SELECT m.instrument_id, m.ts_event, m.price, m.size, m.action, m.side, m.flags, m.ts_recv, m.ts_in_delta, m.sequence, m.discriminator, i.ticker,
-           b.bid_px, b.bid_sz, b.bid_ct, b.ask_px, b.ask_sz, b.ask_ct
+    SELECT 
+        m.instrument_id, 
+        m.ts_event, 
+        m.price, 
+        m.size, 
+        m.action, 
+        m.side, 
+        m.flags, 
+        m.ts_recv, 
+        m.ts_in_delta, 
+        m.sequence, 
+        m.discriminator,
+        CASE 
+            WHEN $5 THEN LEFT(i.ticker, 2) || $6
+            ELSE i.ticker 
+        END AS ticker,
+        b.bid_px, 
+        b.bid_sz, 
+        b.bid_ct, 
+        b.ask_px, 
+        b.ask_sz, 
+        b.ask_ct
     FROM futures_mbp m
     INNER JOIN futures i ON m.instrument_id = i.instrument_id
     LEFT JOIN futures_bid_ask b ON m.id = b.mbp_id AND b.depth = 0
@@ -10,7 +30,21 @@ pub const FUTURES_MBP1_QUERY: &str = r#"
     "#;
 
 pub const FUTURES_TRADE_QUERY: &str = r#"
-    SELECT m.instrument_id, m.ts_event, m.price, m.size, m.action, m.side, m.flags, m.ts_recv, m.ts_in_delta, m.sequence, i.ticker
+    SELECT 
+        m.instrument_id, 
+        m.ts_event, 
+        m.price, 
+        m.size, 
+        m.action, 
+        m.side, 
+        m.flags, 
+        m.ts_recv, 
+        m.ts_in_delta, 
+        m.sequence, 
+        CASE 
+            WHEN $4 THEN LEFT(i.ticker, 2) || $5
+            ELSE i.ticker 
+        END AS ticker
     FROM futures_mbp m
     INNER JOIN futures i ON m.instrument_id = i.instrument_id
     LEFT JOIN futures_bid_ask b ON m.id = b.mbp_id AND b.depth = 0
@@ -57,7 +91,10 @@ pub const FUTURES_OHLCV_QUERY: &str = r#"
       a.low,
       a.high,
       a.volume,
-      i.ticker
+      CASE 
+        WHEN $5 THEN LEFT(i.ticker, 2) || $6
+        ELSE i.ticker 
+      END AS ticker
     FROM aggregated_data a
     INNER JOIN futures i ON a.instrument_id = i.instrument_id
     ORDER BY a.ts_event
@@ -174,12 +211,16 @@ pub const FUTURES_BBO_QUERY: &str = r#"
         fp.side,
         fp.flags,
         fp.sequence,
-        i.ticker
+        CASE 
+            WHEN $5 THEN LEFT(i.ticker, 2) || $6
+            ELSE i.ticker 
+        END AS ticker
     FROM filled_price_size fp
     INNER JOIN futures i ON fp.instrument_id = i.instrument_id
     WHERE fp.ts_recv BETWEEN $1 AND ($2 - $3)
     ORDER BY fp.ts_recv
     "#;
+
 pub const FUTURES_CONTINUOUS_CALENDAR: &str = r#"
     WITH active_contracts AS (
         SELECT
@@ -191,9 +232,9 @@ pub const FUTURES_CONTINUOUS_CALENDAR: &str = r#"
                 ORDER BY expiration_date
             ) - 1 AS rank
         FROM futures
-        WHERE ticker LIKE ANY('{HE%, LE%}')
-          AND expiration_date >=  1705536000000000000 -- start
-          AND first_available <=  1706054400000000000 -- end
+        WHERE ticker LIKE ANY($3)
+          AND expiration_date >= $1 -- start
+          AND first_available <= $2 -- end
     ),
     shifted_schedule AS (
         SELECT
@@ -209,33 +250,35 @@ pub const FUTURES_CONTINUOUS_CALENDAR: &str = r#"
                 PARTITION BY LEFT(ticker, 2)
                 ORDER BY rank
             ) -1 AS rank, -- Dynamically calculate the shifted rank
+            LEFT(ticker, 2) || '.c.' || $4 AS continuous_ticker,
             COALESCE(
                 LAG(
                     CASE
                         -- Handle subsequent contracts
-                        WHEN CEIL(expiration_date / 86400000000000.0) * 86400000000000 > 1705622400000000000  
-                        THEN 1705622400000000000 
+                        WHEN CEIL(expiration_date / 86400000000000.0) * 86400000000000 > $2  
+                        THEN $2 
                         ELSE CEIL(expiration_date / 86400000000000.0) * 86400000000000
                     END
                 ) OVER (PARTITION BY LEFT(ticker, 2) ORDER BY rank),
                 -- Align start to the user's request for the first contract, without skipping the partial day
                 CASE
-                    WHEN rank = 0 THEN  1705536000000000000-- Use the exact start time for the first contract
-                    ELSE CEIL(1705536000000000000 / 86400000000000.0) * 86400000000000 
+                    WHEN rank = 0 THEN $1 -- Use the exact start time for the first contract
+                    ELSE CEIL($1 / 86400000000000.0) * 86400000000000 
                 END
-            ) AS start_time,
-            CASE
-              WHEN CEIL(expiration_date / 86400000000000.0) * 86400000000000 - 1 > 1705622400000000000 
-              THEN 1705622400000000000 
+            )::BIGINT AS start_time,
+            (CASE
+              WHEN CEIL(expiration_date / 86400000000000.0) * 86400000000000 - 1 > $2 
+              THEN $2 
               ELSE CEIL(expiration_date / 86400000000000.0) * 86400000000000 - 1
-            END AS end_time
+            END)::BIGINT AS end_time
         FROM active_contracts
         CROSS JOIN LATERAL (
-            SELECT 0 AS rank_shift
+            SELECT $4 AS rank_shift
         ) AS shift_param
     )
-    Select * from shifted_schedule
-    WHERE rank = 0;
+    SELECT * FROM shifted_schedule 
+    WHERE ticker IS NOT NULL 
+    AND start_time <> end_time;
 "#;
 
 pub const FUTURES_CONTINUOUS_VOLUME: &str = r#"
@@ -246,8 +289,8 @@ pub const FUTURES_CONTINUOUS_VOLUME: &str = r#"
             m.size
         FROM futures_mbp m
         INNER JOIN futures i ON m.instrument_id = i.instrument_id
-        WHERE m.ts_recv BETWEEN 1705536000000000000 AND 1706054400000000000
-        AND i.ticker LIKE ANY('{HE%, LE%}')
+        WHERE m.ts_recv BETWEEN $1 AND $2
+        AND i.ticker LIKE ANY($3)
         AND m.action = 84  -- Filter only trades 
     ),
     aggregated_data AS (
@@ -292,11 +335,11 @@ pub const FUTURES_CONTINUOUS_VOLUME: &str = r#"
           WHERE LEFT(r2.ticker, 2) = LEFT(rv.ticker, 2)
           AND r2.ts_event = rv.ts_event
           )
-        AND rv.expiration_date > 1706054400000000000 
-        THEN 1706054400000000000
+        AND rv.expiration_date > $2 
+        THEN $2 
         ELSE LEAST(
           rv.expiration_date,
-          COALESCE(LEAD(rv.ts_event) OVER (PARTITION BY LEFT(rv.ticker, 2), rv.rank ORDER BY rv.ts_event), 1706054400000000000)) - 1
+          COALESCE(LEAD(rv.ts_event) OVER (PARTITION BY LEFT(rv.ticker, 2), rv.rank ORDER BY rv.ts_event), $2)) - 1
         END AS end_time,
         rv.daily_volume,
         rv.rank
@@ -307,14 +350,18 @@ pub const FUTURES_CONTINUOUS_VOLUME: &str = r#"
             ticker,
             instrument_id,
             rank,
+            LEFT(ticker, 2) || '.v.' || $4 AS continuous_ticker,
             MIN(start_time) AS start_time,
             MAX(end_time) AS end_time
         FROM start_end_schedule
-        WHERE rank = 0
+        WHERE rank = $4 
         GROUP BY ticker, instrument_id, rank
     )
-    select * from rolling_schedule;
+    SELECT * FROM rolling_schedule 
+    ORDER BY start_time
 "#;
+
+// ====== Delete below =======
 
 pub const FUTURES_MBP1_CONTINUOUS_QUERY: &str = r#"
     WITH active_contracts AS (

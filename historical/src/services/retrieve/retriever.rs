@@ -1,5 +1,6 @@
-use crate::database::read::common::RecordsQuery;
-use crate::database::read::rows::get_from_row_fn;
+use super::heap::MinHeap;
+use super::mutex_cursor::MutexCursor;
+use super::query_task::QueryTask;
 use crate::response::ApiResponse;
 use crate::services::utils::query_symbols_map;
 use crate::{Error, Result};
@@ -7,23 +8,23 @@ use async_stream::stream;
 use axum::http::StatusCode;
 use bytes::Bytes;
 use futures::stream::Stream;
-use futures::stream::StreamExt;
 use mbinary::encode::AsyncRecordEncoder;
 use mbinary::encode::MetadataEncoder;
-use mbinary::enums::{RType, Stype};
+use mbinary::enums::Stype;
 use mbinary::metadata::Metadata;
 use mbinary::params::RetrieveParams;
+use mbinary::records::Record;
 use mbinary::{record_enum::RecordEnum, symbols::SymbolMap};
-use sqlx::{PgPool, Row};
+use sqlx::PgPool;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::io::{self};
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
-use tokio::io::AsyncWrite;
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::info;
+
+use tokio::time::{sleep, Duration};
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub enum ContinuousKind {
@@ -33,11 +34,20 @@ pub enum ContinuousKind {
 }
 
 impl ContinuousKind {
-    fn from_str(s: &str) -> Self {
+    fn from_str(s: &str) -> Result<Self> {
         match s {
-            "c" => return ContinuousKind::Calendar,
-            "v" => return ContinuousKind::Volume,
-            _ => return ContinuousKind::None,
+            "c" => return Ok(ContinuousKind::Calendar),
+            "v" => return Ok(ContinuousKind::Volume),
+            "n" => return Ok(ContinuousKind::None),
+            _ => return Err(Error::CustomError("Invalid Continuous type. ".to_string())),
+        }
+    }
+
+    pub fn as_str(&self) -> String {
+        match self {
+            ContinuousKind::Calendar => return "c".to_string(),
+            ContinuousKind::Volume => return "v".to_string(),
+            ContinuousKind::None => return "v".to_string(),
         }
     }
 }
@@ -47,106 +57,33 @@ impl std::fmt::Display for ContinuousKind {
         match self {
             ContinuousKind::Calendar => write!(f, "c"),
             ContinuousKind::Volume => write!(f, "v"),
-            ContinuousKind::None => write!(f, "none"),
+            ContinuousKind::None => write!(f, "n"),
         }
     }
 }
 
-pub struct ContinuousMap {
-    pub id_map: HashMap<i32, HashMap<String, u32>>,
-    pub type_map: HashMap<ContinuousKind, HashMap<i32, Vec<String>>>,
+#[derive(Debug)]
+pub struct Records {
+    pub record: RecordEnum,
 }
 
-impl ContinuousMap {
-    pub fn new() -> Self {
-        Self {
-            type_map: HashMap::new(),
-            id_map: HashMap::new(),
-        }
-    }
-
-    pub fn build_type_map(&mut self, tickers: Vec<String>) {
-        for ticker in tickers {
-            // Parse the ticker into components
-            if let Some((_prefix, rest)) = ticker.split_once('.') {
-                if let Some((kind, rank_str)) = rest.split_once('.') {
-                    // Parse rank as integer
-                    if let Ok(rank) = rank_str.parse::<i32>() {
-                        // Insert into the nested HashMap
-                        self.type_map
-                            .entry(ContinuousKind::from_str(kind)) // "c" or "v"
-                            .or_insert_with(HashMap::new)
-                            .entry(rank) // rank (e.g., 1, 2, 3)
-                            .or_insert_with(Vec::new)
-                            .push(ticker);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Updates `id_map` with a given ticker and ID
-    pub fn update_id_map(&mut self, ticker: &str, id: u32) {
-        if let Some((prefix, rest)) = ticker.split_once('.') {
-            if let Some((_kind, rank_str)) = rest.split_once('.') {
-                if let Ok(rank) = rank_str.parse::<i32>() {
-                    self.id_map
-                        .entry(rank)
-                        .or_insert_with(HashMap::new)
-                        .insert(prefix.to_string(), id);
-                }
-            }
-        }
-    }
-    /// Retrieves the ID from `id_map` given a full ticker
-    pub fn get_id(&self, ticker: &str, rank: i32) -> Option<u32> {
-        let prefix = ticker.get(..2).unwrap_or(""); // TODO: Should be an error
-        return self.id_map.get(&rank)?.get(prefix).copied();
+impl PartialEq for Records {
+    fn eq(&self, other: &Self) -> bool {
+        self.record.timestamp() == other.record.timestamp()
     }
 }
 
-pub struct MutexCursor {
-    inner: Arc<Mutex<Cursor<Vec<u8>>>>,
-}
+impl Eq for Records {}
 
-impl MutexCursor {
-    pub fn new(cursor: Arc<Mutex<Cursor<Vec<u8>>>>) -> Self {
-        Self { inner: cursor }
+impl PartialOrd for Records {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
-impl AsyncWrite for MutexCursor {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        match self.inner.try_lock() {
-            Ok(mut cursor) => Poll::Ready(std::io::Write::write(&mut *cursor, buf)), // Lock acquired successfully
-            Err(_) => {
-                // If the lock is not available, return Pending
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            }
-        }
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        match self.inner.try_lock() {
-            Ok(mut cursor) => {
-                // Explicitly use the `std::io::Write` trait for `flush`
-                Poll::Ready(std::io::Write::flush(&mut *cursor))
-            } // Lock acquired successfully
-            Err(_) => {
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            }
-        }
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        // No additional shutdown behavior needed for Cursor
-        Poll::Ready(Ok(()))
+impl Ord for Records {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.record.timestamp().cmp(&other.record.timestamp())
     }
 }
 
@@ -156,176 +93,226 @@ pub struct RecordGetter {
     batch_counter: Arc<Mutex<i64>>,
     retrieve_params: Arc<Mutex<RetrieveParams>>,
     symbol_map: Arc<Mutex<SymbolMap>>,
-    continuous_map: Arc<Mutex<ContinuousMap>>,
+    encoder: Arc<Mutex<AsyncRecordEncoder<MutexCursor>>>,
+    tasks: Arc<Mutex<HashMap<String, Arc<Mutex<QueryTask>>>>>,
+    heap: Arc<Mutex<MinHeap<Records>>>,
     cursor: Arc<Mutex<Cursor<Vec<u8>>>>,
     pool: PgPool,
-    encoder: Arc<Mutex<AsyncRecordEncoder<MutexCursor>>>,
 }
 
 impl RecordGetter {
     pub async fn new(batch_size: i64, params: RetrieveParams, pool: PgPool) -> Result<Self> {
-        let cursor = Arc::new(Mutex::new(Cursor::new(Vec::new()))); // Wrap in Arc<Mutex>
+        let cursor = Arc::new(Mutex::new(Cursor::new(Vec::new())));
 
         // Wrap the cursor in MutexCursor for compatibility with RecordEncoder
         let writer = MutexCursor::new(Arc::clone(&cursor));
         let encoder = AsyncRecordEncoder::new(writer);
 
-        Ok(RecordGetter {
+        // Raw type-specific initialization
+        // let symbol_map = query_symbols_map(&pool, &params.symbols, params.dataset).await?;
+
+        let mut getter = RecordGetter {
             batch_size,
             end_records: Arc::new(Mutex::new(false)),
             batch_counter: Arc::new(Mutex::new(0)),
             retrieve_params: Arc::new(Mutex::new(params)),
             symbol_map: Arc::new(Mutex::new(SymbolMap::new())),
-            continuous_map: Arc::new(Mutex::new(ContinuousMap::new())),
-            cursor, // Shared cursor
+            encoder: Arc::new(Mutex::new(encoder)),
+            tasks: Arc::new(Mutex::new(HashMap::new())),
+            heap: Arc::new(Mutex::new(MinHeap::new())),
+            cursor,
             pool,
-            encoder: Arc::new(Mutex::new(encoder)), // Shared encoder
-        })
+        };
+
+        getter.initialize_tasks().await?;
+
+        Ok(getter)
     }
 
-    pub async fn get_records(&self, params: &RetrieveParams, kind: &ContinuousKind) -> Result<()> {
-        let rtype = RType::from(params.rtype().unwrap());
-        let from_row_fn = get_from_row_fn(rtype);
+    pub async fn initialize_tasks(&mut self) -> Result<()> {
+        let params = self.retrieve_params.lock().await.clone();
+        let mut tasks = self.tasks.lock().await;
 
-        let mut cursor = RecordEnum::retrieve_query(&self.pool, params, kind).await?;
-        // info!("Processing queried records.");
+        match params.stype {
+            Stype::Raw => {
+                // Only one task for raw
+                let task_id = "raw".to_string();
+                let tickers = params.symbols.clone();
+                let task = QueryTask::new(
+                    task_id.clone(),
+                    params.clone(),
+                    tickers,
+                    0,
+                    ContinuousKind::None,
+                    self.pool.clone(),
+                    Arc::clone(&self.heap), // Pass shared heap reference to task
+                )
+                .await?;
 
-        while let Some(row_result) = cursor.next().await {
-            match row_result {
-                Ok(row) => {
-                    // Use the from_row_fn here
-                    let record = from_row_fn(&row, None)?;
+                tasks.insert(task_id, Arc::new(Mutex::new(task)));
+            }
+            Stype::Continuous => {
+                let mut ticker_map: HashMap<String, Vec<String>> = HashMap::new();
 
-                    // Convert to RecordEnum and add to encoder
-                    let record_ref = record.to_record_ref();
-                    self.encoder
-                        .lock()
-                        .await
-                        .encode_record(&record_ref)
-                        .await
-                        .unwrap();
-
-                    // Increment the batch counter
-                    *self.batch_counter.lock().await += 1;
+                for ticker in &params.symbols {
+                    if let Some((_base, task_id)) = ticker.split_once('.') {
+                        // Group tickers by "c.X" (task_id)
+                        ticker_map
+                            .entry(task_id.to_string())
+                            .or_insert_with(Vec::new)
+                            .push(ticker.clone());
+                    }
                 }
-                Err(e) => {
-                    error!("Error processing row: {:?}", e);
-                    return Err(e.into());
+
+                // Create QueryTasks for each c.X group
+                for (task_id, tickers) in ticker_map {
+                    if let Some((kind, rank_str)) = task_id.split_once('.') {
+                        if let Ok(rank) = rank_str.parse::<i32>() {
+                            // Insert into the nested HashMap
+
+                            let task = QueryTask::new(
+                                task_id.clone(),
+                                params.clone(),
+                                tickers,
+                                rank,
+                                ContinuousKind::from_str(kind)?,
+                                self.pool.clone(),
+                                Arc::clone(&self.heap), // Pass shared heap reference to task
+                            )
+                            .await?;
+
+                            tasks.insert(task_id, Arc::new(Mutex::new(task)));
+                        }
+                    }
                 }
             }
         }
+
         Ok(())
     }
 
-    // -- Raw Symbols
+    // -- Raw symbols
     pub async fn process_metadata(&self) -> Result<Cursor<Vec<u8>>> {
         let mut metadata_cursor = Cursor::new(Vec::new());
         let mut metadata_encoder = MetadataEncoder::new(&mut metadata_cursor);
 
         let retrieve_params: RetrieveParams = self.retrieve_params.lock().await.clone();
 
-        let symbol_map = query_symbols_map(
-            &self.pool,
-            &retrieve_params.symbols,
-            retrieve_params.dataset,
-        )
-        .await?;
+        let tasks = self.tasks.lock().await; // Lock task collection
+
+        for task in tasks.values() {
+            let task = task.lock().await; // Lock each task
+
+            // Merge symbol maps (Assuming SymbolMap has a `merge` method)
+            self.symbol_map.lock().await.merge(&task.symbol_map);
+        }
 
         let metadata = Metadata::new(
             retrieve_params.schema,
             retrieve_params.dataset,
             retrieve_params.start_ts as u64,
             retrieve_params.end_ts as u64,
-            symbol_map,
+            self.symbol_map.lock().await.clone(),
         );
         metadata_encoder.encode_metadata(&metadata)?;
 
         Ok(metadata_cursor)
     }
 
-    pub async fn process_records(self: Arc<Self>) -> Result<()> {
-        // Clone the parameters to avoid locking or mutability issues
-        let mut params = self.retrieve_params.lock().await.clone();
+    pub async fn process_heap(self: Arc<Self>) -> Result<()> {
+        loop {
+            let mut heap = self.heap.lock().await;
 
-        // Adjust start/ end to be star  end of repective interval
-        let _ = params.interval_adjust_ts_start()?;
-        let _ = params.interval_adjust_ts_end()?;
-        let final_end = params.end_ts;
+            // If the heap is empty and we have finished processing all records, break the loop
+            if heap.is_empty() {
+                if *self.end_records.lock().await {
+                    break;
+                }
+                drop(heap); // Release lock before sleeping
+                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                continue;
+            }
 
-        while (final_end - params.start_ts) > 86_400_000_000_001 {
-            params.end_ts = params.start_ts + 86_400_000_000_000;
-            self.get_records(&params, &ContinuousKind::None).await?;
-            params.start_ts = params.end_ts;
+            // Pop the record with the smallest timestamp (heap behavior)
+            let heap_item = heap.pop().unwrap();
+            drop(heap); // Release the lock before processing
+
+            // Process the record
+            let record_ref = heap_item.record.to_record_ref();
+
+            self.encoder
+                .lock()
+                .await
+                .encode_record(&record_ref)
+                .await
+                .unwrap();
+
+            // Increment batch counter
+            *self.batch_counter.lock().await += 1;
         }
-
-        params.end_ts = final_end;
-        self.get_records(&params, &ContinuousKind::None).await?;
-
-        // let mut cursor =
-        //     RecordEnum::retrieve_query(&self.pool, &params, &ContinuousKind::None).await?;
-        // info!("Processing queried records.");
-        //
-        // while let Some(row_result) = cursor.next().await {
-        //     match row_result {
-        //         Ok(row) => {
-        //             // Use the from_row_fn here
-        //             let record = from_row_fn(&row, None)?;
-        //
-        //             // Convert to RecordEnum and add to encoder
-        //             let record_ref = record.to_record_ref();
-        //             self.encoder
-        //                 .lock()
-        //                 .await
-        //                 .encode_record(&record_ref)
-        //                 .await
-        //                 .unwrap();
-        //
-        //             // Increment the batch counter
-        //             *self.batch_counter.lock().await += 1;
-        //         }
-        //         Err(e) => {
-        //             error!("Error processing row: {:?}", e);
-        //             return Err(e.into());
-        //         }
-        //     }
-        // }
-        *self.end_records.lock().await = true;
 
         Ok(())
     }
 
-    pub async fn stream_rawsymbols(
-        self: Arc<Self>,
-    ) -> Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>> {
+    pub async fn stream(self: Arc<Self>) -> Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>> {
         let p_stream = stream! {
-            // Stream metadata first
-            match self.process_metadata().await {
-                Ok(metadata_cursor) => {
-                    let buffer_ref = metadata_cursor.get_ref();
-                    let bytes = Bytes::copy_from_slice(buffer_ref);
-                    yield Ok::<Bytes, Error>(bytes);
-                }
-                Err(e) => {
-                    let response = ApiResponse::new(
-                        "failed",
-                        &format!("{:?}", e),
-                        StatusCode::CONFLICT,
-                        "".to_string(),
-                    );
-                    yield Ok(response.bytes());
-                    return;
-                }
-            };
+                // Stream metadata first
+                match self.process_metadata().await {
+                    Ok(metadata_cursor) => {
+                        let buffer_ref = metadata_cursor.get_ref();
+                        let bytes = Bytes::copy_from_slice(buffer_ref);
+                        yield Ok::<Bytes, Error>(bytes);
+                    }
+                    Err(e) => {
+                        let response = ApiResponse::new(
+                            "failed",
+                            &format!("{:?}", e),
+                            StatusCode::CONFLICT,
+                            "".to_string(),
+                        );
+                        yield Ok(response.bytes());
+                        return;
+                    }
+                };
 
-            // Spawn record processing
+            // Spawn min heap process
             let record_getter = Arc::clone(&self);
             let _records_processing = tokio::spawn(async move {
-                record_getter.process_records().await
+                record_getter.process_heap().await
             });
+
+            // Spanw task processes
+            let mut handles = Vec::new();
+            let tasks = self.tasks.lock().await; // Lock the task map
+
+            for task in tasks.values() {
+                let task_arc = Arc::clone(task);
+
+                let handle = tokio::spawn(async move {
+                    let mut task = task_arc.lock().await; // Lock the mutex before calling process_records
+                    task.process_records().await;
+                });
+                handles.push(handle);
+            }
+
+            let task_handler = Arc::clone(&self);
+            let task_manager = tokio::spawn(async move {
+                // Wait for all record-processing tasks
+                for handle in handles {
+                    let _ = handle.await;
+                }
+
+                // Signal that records are done
+                *task_handler.end_records.lock().await = true;
+                println!("All records processed, signaling heap to finalize.");
+            });
+
+
 
             // Stream record batches while processing continues
             loop {
                 let end_records = self.end_records.lock().await;
+                // println!("{}", end_records);
                 if *end_records {
                     break;
                 }
@@ -343,8 +330,7 @@ impl RecordGetter {
                         let cursor = self.cursor.lock().await;
                         Bytes::copy_from_slice(cursor.get_ref())
                     };
-
-                    // info!("Sending buffer, size: {:?}", batch_bytes.len());
+                    info!("Sending buffer, size: {:?}", batch_bytes.len());
                     yield Ok::<Bytes, Error>(batch_bytes);
 
                     // Reset cursor and batch counter
@@ -362,10 +348,12 @@ impl RecordGetter {
                 tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
             }
 
+
+            // println!("shoudle be retunrign records remainign ehre");
             // Send any remaining data that wasn't part of a full batch
             if !self.cursor.lock().await.get_ref().is_empty() {
                 let remaining_bytes = Bytes::copy_from_slice(self.cursor.lock().await.get_ref());
-                // info!("Sending remaining buffer, size: {:?}", remaining_bytes.len());
+                println!("Sending remaining buffer, size: {:?}", remaining_bytes.len());
                 yield Ok::<Bytes, Error>(remaining_bytes);
             }
 
@@ -376,269 +364,150 @@ impl RecordGetter {
         Box::pin(p_stream)
     }
 
-    // -- Continuous
-    pub async fn process_continuous_metadata(&self) -> Result<Cursor<Vec<u8>>> {
-        let mut metadata_cursor = Cursor::new(Vec::new());
-        let mut metadata_encoder = MetadataEncoder::new(&mut metadata_cursor);
+    // pub async fn stream_continuous(
+    //     self: Arc<Self>,
+    // ) -> Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>> {
+    //     let p_stream = stream! {
+    //         // Pull the symbols for mutation
+    //
+    //         // Stream metadata first
+    //         match self.process_metadata().await {
+    //             Ok(metadata_cursor) => {
+    //                 let buffer_ref = metadata_cursor.get_ref();
+    //                 let bytes = Bytes::copy_from_slice(buffer_ref);
+    //                 yield Ok::<Bytes, Error>(bytes);
+    //             }
+    //             Err(e) => {
+    //                 let response = ApiResponse::new(
+    //                     "failed",
+    //                     &format!("{:?}", e),
+    //                     StatusCode::CONFLICT,
+    //                     "".to_string(),
+    //                 );
+    //                 yield Ok(response.bytes());
+    //                 return;
+    //             }
+    //         };
+    //
+    //                     // Spawn a task for each query task to process records concurrently
+    //         let mut handles = Vec::new();
+    //         let tasks = self.tasks.lock().await; // Lock the task map
+    //
+    //         for task in tasks.values() {
+    //             let task_arc = Arc::clone(task);
+    //
+    //             let handle = tokio::spawn(async move {
+    //                 let mut task = task_arc.lock().await; // Lock the mutex before calling process_records
+    //                 task.process_records().await;
+    //             });
+    //
+    //             handles.push(handle);
+    //         }
+    //
+    //
+    //         // Wait for all tasks to complete
+    //         for handle in handles {
+    //             if let Err(e) = handle.await {
+    //                 let response = ApiResponse::new(
+    //                     "failed",
+    //                     &format!("Task error: {:?}", e),
+    //                     StatusCode::INTERNAL_SERVER_ERROR,
+    //                     "".to_string(),
+    //                 );
+    //                 yield Ok(response.bytes());
+    //                 return;
+    //             }
+    //         }
+    //
+    //         // Spaw
+    //         loop {
+    //             let end_records = self.end_records.lock().await;
+    //             if *end_records {
+    //                 break;
+    //             }
+    //
+    //             let mut batch_counter = self.batch_counter.lock().await;
+    //             if *batch_counter > self.batch_size {
+    //                 let batch_bytes = {
+    //                     self.encoder.lock()
+    //                             .await
+    //                             .flush()
+    //                             .await
+    //                             .unwrap();
+    //
+    //                     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await; // Ensure async write settles
+    //
+    //
+    //                     let cursor = self.cursor.lock().await;
+    //                     Bytes::copy_from_slice(cursor.get_ref())
+    //                 };
+    //
+    //                 info!("Sending buffer, size: {:?}", batch_bytes.len());
+    //                 yield Ok::<Bytes, Error>(batch_bytes);
+    //
+    //                 // Reset cursor and batch counter
+    //                 {
+    //                     let mut cursor = self.cursor.lock().await;
+    //                     cursor.get_mut().clear();
+    //                     cursor.set_position(0);
+    //                 }
+    //                 *batch_counter = 0;
+    //             }
+    //
+    //             drop(batch_counter);
+    //             drop(end_records);
+    //
+    //             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    //         }
+    //
+    //         // Send any remaining data that wasn't part of a full batch
+    //         if !self.cursor.lock().await.get_ref().is_empty() {
+    //             let remaining_bytes = Bytes::copy_from_slice(self.cursor.lock().await.get_ref());
+    //             info!("Sending remaining buffer, size: {:?}", remaining_bytes.len());
+    //             yield Ok::<Bytes, Error>(remaining_bytes);
+    //         }
+    //
+    //         info!("Finished streaming all batches");
+    //         return;
+    //     };
+    //
+    //     Box::pin(p_stream)
+    // }
 
-        let retrieve_params = self.retrieve_params.lock().await.clone();
-        let mut symbol_map = self.symbol_map.lock().await;
-        let mut continuous_map = self.continuous_map.lock().await;
-
-        // Dynamically generate synthetic symbol_map for continuous contracts
-        for (index, ticker) in retrieve_params.symbols.iter().enumerate() {
-            let synthetic_id = 1_000_000 + index as u32; // Generate synthetic ID
-            symbol_map.add_instrument(&ticker, synthetic_id);
-            continuous_map.update_id_map(ticker, synthetic_id);
-        }
-
-        // Construct metadata with the synthetic symbol_map
-        let metadata = Metadata::new(
-            retrieve_params.schema,
-            retrieve_params.dataset,
-            retrieve_params.start_ts as u64,
-            retrieve_params.end_ts as u64,
-            symbol_map.clone(), // Pass the synthetic map
-        );
-
-        metadata_encoder.encode_metadata(&metadata)?;
-
-        // Return both metadata_cursor and the generated symbol_map
-        Ok(metadata_cursor)
-    }
-
-    pub async fn get_records_continuous(&self, mut params: RetrieveParams) -> Result<()> {
-        let continuous_map = self.continuous_map.lock().await; // Clone to avoid holding the lock
-        let rtype = RType::from(params.rtype().unwrap());
-        let from_row_fn = get_from_row_fn(rtype);
-
-        for (kind, rank_map) in continuous_map.type_map.iter() {
-            let mut count = 0;
-            for (rank, tickers) in rank_map {
-                info!(
-                    "Processing kind: {}, rank: {}, tickers: {:?}",
-                    kind, rank, tickers
-                );
-
-                params.symbols = tickers.clone();
-
-                let mut cursor = RecordEnum::retrieve_query(&self.pool, &params, kind).await?;
-
-                while let Some(row_result) = cursor.next().await {
-                    match row_result {
-                        Ok(row) => {
-                            let ticker: String = row.try_get("ticker")?;
-                            let new_id = continuous_map.get_id(&ticker, *rank);
-
-                            // Use the from_row_fn here
-                            let record = from_row_fn(&row, new_id)?;
-
-                            // Convert to RecordEnum and add to encoder
-                            let record_ref = record.to_record_ref();
-                            self.encoder
-                                .lock()
-                                .await
-                                .encode_record(&record_ref)
-                                .await
-                                .unwrap();
-                            count += 1;
-
-                            // Increment the batch counter
-                            *self.batch_counter.lock().await += 1;
-                        }
-                        Err(e) => {
-                            error!("Error processing row: {:?}", e);
-                            return Err(e.into());
-                        }
-                    }
-                }
-                info!("Count of records processed {}", count);
-            }
-        }
-        Ok(())
-    }
-
-    pub async fn process_continuous_records(self: Arc<Self>) -> Result<()> {
-        // Clone the parameters to avoid locking or mutability issues
-        let mut params = self.retrieve_params.lock().await.clone();
-        // let rtype = RType::from(params.rtype().unwrap());
-
-        // let from_row_fn = get_from_row_fn(rtype);
-
-        let _ = params.interval_adjust_ts_start()?;
-        let _ = params.interval_adjust_ts_end()?;
-        let final_end = params.end_ts;
-
-        while (final_end - params.start_ts) > 86_400_000_000_001 {
-            params.end_ts = params.start_ts + 86_400_000_000_000;
-            self.get_records_continuous(params.clone()).await?;
-            params.start_ts = params.end_ts;
-        }
-
-        params.end_ts = final_end;
-        self.get_records_continuous(params.clone()).await?;
-
-        // let continuous_map = self.continuous_map.lock().await; // Clone to avoid holding the lock
-
-        // for (kind, rank_map) in continuous_map.type_map.iter() {
-        //     let mut count = 0;
-        //     for (rank, tickers) in rank_map {
-        //         info!(
-        //             "Processing kind: {}, rank: {}, tickers: {:?}",
-        //             kind, rank, tickers
-        //         );
-        //
-        //         params.symbols = tickers.clone();
-        //
-        //         let mut cursor = RecordEnum::retrieve_query(&self.pool, &params, kind).await?;
-        //
-        //         while let Some(row_result) = cursor.next().await {
-        //             match row_result {
-        //                 Ok(row) => {
-        //                     let ticker: String = row.try_get("ticker")?;
-        //                     let new_id = continuous_map.get_id(&ticker, *rank);
-        //
-        //                     // Use the from_row_fn here
-        //                     let record = from_row_fn(&row, new_id)?;
-        //
-        //                     // Convert to RecordEnum and add to encoder
-        //                     let record_ref = record.to_record_ref();
-        //                     self.encoder
-        //                         .lock()
-        //                         .await
-        //                         .encode_record(&record_ref)
-        //                         .await
-        //                         .unwrap();
-        //                     count += 1;
-        //
-        //                     // Increment the batch counter
-        //                     *self.batch_counter.lock().await += 1;
-        //                 }
-        //                 Err(e) => {
-        //                     error!("Error processing row: {:?}", e);
-        //                     return Err(e.into());
-        //                 }
-        //             }
-        //         }
-        //         info!("Count of records processed {}", count);
-        //     }
-        // }
-        *self.end_records.lock().await = true;
-
-        Ok(())
-    }
-
-    pub async fn stream_continuous(
-        self: Arc<Self>,
-    ) -> Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>> {
-        let p_stream = stream! {
-            // Pull the symbols for mutation
-            let tickers: Vec<String> = self.retrieve_params.lock().await.symbols.clone();
-            self.continuous_map.lock().await.build_type_map(tickers);
-
-            // Stream metadata first
-            match self.process_continuous_metadata().await {
-                Ok(metadata_cursor) => {
-                    let buffer_ref = metadata_cursor.get_ref();
-                    let bytes = Bytes::copy_from_slice(buffer_ref);
-                    yield Ok::<Bytes, Error>(bytes);
-                }
-                Err(e) => {
-                    let response = ApiResponse::new(
-                        "failed",
-                        &format!("{:?}", e),
-                        StatusCode::CONFLICT,
-                        "".to_string(),
-                    );
-                    yield Ok(response.bytes());
-                    return;
-                }
-            };
-
-            // Spawn record processing
-            let record_getter = Arc::clone(&self);
-            let _records_processing = tokio::spawn(async move {
-                record_getter.process_continuous_records().await
-            });
-
-            // Stream record batches while processing continues
-            loop {
-                let end_records = self.end_records.lock().await;
-                if *end_records {
-                    break;
-                }
-
-                let mut batch_counter = self.batch_counter.lock().await;
-                if *batch_counter > self.batch_size {
-                    let batch_bytes = {
-                        self.encoder.lock()
-                                .await
-                                .flush()
-                                .await
-                                .unwrap();
-
-                        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await; // Ensure async write settles
-
-
-                        let cursor = self.cursor.lock().await;
-                        Bytes::copy_from_slice(cursor.get_ref())
-                    };
-
-                    info!("Sending buffer, size: {:?}", batch_bytes.len());
-                    yield Ok::<Bytes, Error>(batch_bytes);
-
-                    // Reset cursor and batch counter
-                    {
-                        let mut cursor = self.cursor.lock().await;
-                        cursor.get_mut().clear();
-                        cursor.set_position(0);
-                    }
-                    *batch_counter = 0;
-                }
-
-                drop(batch_counter);
-                drop(end_records);
-
-                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-            }
-
-            // Send any remaining data that wasn't part of a full batch
-            if !self.cursor.lock().await.get_ref().is_empty() {
-                let remaining_bytes = Bytes::copy_from_slice(self.cursor.lock().await.get_ref());
-                info!("Sending remaining buffer, size: {:?}", remaining_bytes.len());
-                yield Ok::<Bytes, Error>(remaining_bytes);
-            }
-
-            info!("Finished streaming all batches");
-            return;
-        };
-
-        Box::pin(p_stream)
-    }
-
-    pub async fn stream(self: Arc<Self>) -> Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>> {
-        if self.retrieve_params.lock().await.stype == Stype::Continuous {
-            self.stream_continuous().await
-        } else {
-            self.stream_rawsymbols().await
-        }
-    }
+    // pub async fn stream(self: Arc<Self>) -> Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>> {
+    //     if self.retrieve_params.lock().await.stype == Stype::Continuous {
+    //         self.stream_continuous().await
+    //     } else {
+    //         self.stream_rawsymbols().await
+    //     }
+    // }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::database::init::init_db;
+    use crate::response::ApiResponse;
+    use crate::services::load::create_record;
+    use axum::response::IntoResponse;
+    use axum::{Extension, Json};
     use dotenv;
-    use mbinary::decode::MetadataDecoder;
+    use futures::pin_mut;
+    use futures::stream::StreamExt; // Use StreamExt from futures
+    use hyper::body::HttpBody as _;
+    use mbinary::decode::{Decoder, MetadataDecoder};
+    use mbinary::encode::CombinedEncoder;
     use mbinary::enums::Dataset;
     use mbinary::enums::{Schema, Stype};
+    use mbinary::metadata::Metadata;
+    use mbinary::record_ref::RecordRef;
+    use mbinary::records::{BidAskPair, Mbp1Msg, Record, RecordHeader};
     use mbinary::symbols::Instrument;
     use mbinary::vendors::Vendors;
     use mbinary::vendors::{DatabentoData, VendorData};
     use serial_test::serial;
     use sqlx::postgres::PgPoolOptions;
-    use std::str::FromStr;
+    use std::str::FromStr; // Needed to pin the stream
 
     // -- Helper functions
     async fn create_instrument(instrument: Instrument) -> Result<i32> {
@@ -664,8 +533,8 @@ mod test {
 
         let query = format!(
             r#"
-            INSERT INTO {} (instrument_id, ticker, name, vendor,vendor_data, last_available, first_available, active)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO {} (instrument_id, ticker, name, vendor,vendor_data, last_available, first_available, expiration_date, active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING id
             "#,
             instrument.dataset.as_str()
@@ -679,6 +548,7 @@ mod test {
             .bind(instrument.vendor_data as i64)
             .bind(instrument.last_available as i64)
             .bind(instrument.first_available as i64)
+            .bind(instrument.expiration_date as i64)
             .bind(instrument.active)
             .execute(&mut *tx) // Borrow tx mutably
             .await?;
@@ -710,14 +580,10 @@ mod test {
         Ok(())
     }
 
-    #[sqlx::test]
-    #[serial]
-    async fn test_record_getter_process_metadata() -> anyhow::Result<()> {
-        dotenv::dotenv().ok();
-        let pool = init_db().await.unwrap();
-
+    async fn create_futures() -> anyhow::Result<Vec<i32>> {
+        //  Vendor data
         let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("XNAS.ITCH")?;
+        let dbn_dataset = dbn::Dataset::from_str("GLBX.MDP3")?;
         let stype = dbn::SType::from_str("raw_symbol")?;
         let vendor_data = VendorData::Databento(DatabentoData {
             schema,
@@ -725,59 +591,157 @@ mod test {
             stype,
         });
 
+        // Create instrument
+        let dataset = Dataset::Futures;
+        let vendor = Vendors::Databento;
+        let mut instruments = Vec::new();
+
+        // LEG4
+        instruments.push(Instrument::new(
+            None,
+            "LEG4",
+            "LiveCattle-0224",
+            dataset,
+            vendor,
+            vendor_data.encode(),
+            1709229600000000000,
+            1704067200000000000,
+            1709229600000000000,
+            true,
+        ));
+
+        // HEG4
+        instruments.push(Instrument::new(
+            None,
+            "HEG4",
+            "LeanHogs-0224",
+            dataset,
+            vendor,
+            vendor_data.encode(),
+            1707933600000000000,
+            1704067200000000000,
+            1707933600000000000,
+            true,
+        ));
+
+        // HEJ4
+        instruments.push(Instrument::new(
+            None,
+            "HEJ4",
+            "LeanHogs-0424",
+            dataset,
+            vendor,
+            vendor_data.encode(),
+            1712941200000000000,
+            1704067200000000000,
+            1712941200000000000,
+            true,
+        ));
+
+        // LEJ4
+        instruments.push(Instrument::new(
+            None,
+            "LEJ4",
+            "LiveCattle-0424",
+            dataset,
+            vendor,
+            vendor_data.encode(),
+            1714496400000000000,
+            1704067200000000000,
+            1714496400000000000,
+            true,
+        ));
+
+        // HEK4
+        instruments.push(Instrument::new(
+            None,
+            "HEK4",
+            "LeanHogs-0524",
+            dataset,
+            vendor,
+            vendor_data.encode(),
+            1715706000000000000,
+            1704067200000000000,
+            1715706000000000000,
+            true,
+        ));
+
+        // HEM4
+        instruments.push(Instrument::new(
+            None,
+            "HEM4",
+            "LeanHogs-0624",
+            dataset,
+            vendor,
+            vendor_data.encode(),
+            1718384400000000000,
+            1704067200000000000,
+            1718384400000000000,
+            true,
+        ));
+
+        // LEM4
+        instruments.push(Instrument::new(
+            None,
+            "LEM4",
+            "LiveCattle-0624",
+            dataset,
+            vendor,
+            vendor_data.encode(),
+            1719594000000000000,
+            1704067200000000000,
+            1719594000000000000,
+            true,
+        ));
+
         let mut ids = Vec::new();
-        let tickers = vec![
-            "ZC.n.0".to_string(),
-            "GF.n.0".to_string(),
-            "LE.n.0".to_string(),
-            "ZS.n.0".to_string(),
-            "ZL.n.0".to_string(),
-            "ZM.n.0".to_string(),
-            "HE.n.0".to_string(),
-            "CL.n.0".to_string(),
-            // "CU.n.0".to_string(),
-        ];
-
-        let dataset = Dataset::Equities;
-        let name = "Apple Inc.";
-
-        for ticker in &tickers {
-            let instrument = Instrument::new(
-                None,
-                ticker,
-                name,
-                dataset.clone(),
-                Vendors::Databento,
-                vendor_data.encode(),
-                1704672000000000000,
-                1704672000000000000,
-                0,
-                true,
-            );
-            let id = create_instrument(instrument).await?;
+        for i in instruments {
+            let id = create_instrument(i).await?;
             ids.push(id);
         }
 
-        // Test
+        Ok(ids)
+    }
+
+    #[sqlx::test]
+    #[serial]
+    // #[ignore]
+    async fn test_query_task_symbols_map_raw() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+        let ids = create_futures().await?;
+
+        let tickers = vec![
+            "HEJ4".to_string(),
+            "LEJ4".to_string(),
+            "HEG4".to_string(),
+            "LEG4".to_string(),
+        ];
+
         let params = RetrieveParams {
-            symbols: tickers,
-            start_ts: 1704209103644092563,
-            end_ts: 1704209903644092569,
+            symbols: tickers.clone(),
+            start_ts: 1704085200000000000,
+            end_ts: 1714536000000000000,
             schema: Schema::Mbp1,
-            dataset,
+            dataset: Dataset::Futures,
             stype: Stype::Raw,
         };
-        let getter = RecordGetter::new(1000, params, pool.clone()).await?;
-        let mut metadata_cursor = getter.process_metadata().await?;
-        metadata_cursor.set_position(0);
+
+        // Test
+        let heap = Arc::new(Mutex::new(MinHeap::new()));
+        let task = QueryTask::new(
+            "raw".to_string(),
+            params,
+            tickers,
+            0,
+            ContinuousKind::None,
+            pool,
+            heap,
+        )
+        .await?;
 
         // Validate
-        let mut decoded_metadata = MetadataDecoder::new(metadata_cursor);
-        let metadata = decoded_metadata.decode()?.unwrap();
-        assert_eq!(Schema::Mbp1, metadata.schema);
-        assert_eq!(1704209103644092563, metadata.start);
-        assert_eq!(1704209903644092569, metadata.end);
-        assert_eq!(8, metadata.mappings.map.len());
+        assert!(task.symbol_map.map.keys().len() == 4);
 
         // Cleanup
         for id in ids {
@@ -789,96 +753,600 @@ mod test {
 
     #[sqlx::test]
     #[serial]
-    async fn test_continuous_map_type_map() -> anyhow::Result<()> {
+    async fn test_query_task_symbols_map_continuous() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+        let ids = create_futures().await?;
 
-        let tickers = vec![
-            "HE.c.1".to_string(),
-            "HE.c.0".to_string(),
-            "LE.c.1".to_string(),
-            "LE.c.0".to_string(),
-        ];
+        let tickers = vec!["HE".to_string(), "LE".to_string()];
+
+        let params = RetrieveParams {
+            symbols: tickers.clone(),
+            start_ts: 1704085200000000000,
+            end_ts: 1714536000000000000,
+            schema: Schema::Mbp1,
+            dataset: Dataset::Futures,
+            stype: Stype::Continuous,
+        };
 
         // Test
-        let mut c_map = ContinuousMap::new();
-        c_map.build_type_map(tickers);
-
-        // Validate
-        let expected = HashMap::from([(
-            // "c".to_string(),
+        let heap = Arc::new(Mutex::new(MinHeap::new()));
+        let task = QueryTask::new(
+            "c.0".to_string(),
+            params.clone(),
+            tickers.clone(),
+            0,
             ContinuousKind::Calendar,
-            HashMap::from([
-                (1, vec!["HE.c.1".to_string(), "LE.c.1".to_string()]),
-                (0, vec!["HE.c.0".to_string(), "LE.c.0".to_string()]),
-            ]),
-        )]);
-        assert_eq!(expected, c_map.type_map);
-
-        Ok(())
-    }
-
-    #[sqlx::test]
-    #[serial]
-    async fn test_continuous_update_id_map() -> anyhow::Result<()> {
-        dotenv::dotenv().ok();
-
-        let tickers = vec![
-            "HE.c.1".to_string(),
-            "HE.c.0".to_string(),
-            "LE.c.1".to_string(),
-            "LE.c.0".to_string(),
-        ];
-
-        // Test
-        let mut c_map = ContinuousMap::new();
-        c_map.build_type_map(tickers.clone());
-
-        // Dynamically generate synthetic symbol_map for continuous contracts
-        for (index, ticker) in tickers.iter().enumerate() {
-            let synthetic_id = 1_000_000 + index as u32; // Generate synthetic ID
-            c_map.update_id_map(ticker, synthetic_id);
-        }
+            pool.clone(),
+            Arc::clone(&heap),
+        )
+        .await?;
+        let _task2 = QueryTask::new(
+            "c.1".to_string(),
+            params,
+            tickers,
+            1,
+            ContinuousKind::Calendar,
+            pool.clone(),
+            Arc::clone(&heap),
+        )
+        .await?;
 
         // Validate
-        let expected = HashMap::from([
-            (
-                1,
-                HashMap::from([("HE".to_string(), 1000000), ("LE".to_string(), 1000002)]),
-            ),
-            (
-                0,
-                HashMap::from([("HE".to_string(), 1000001), ("LE".to_string(), 1000003)]),
-            ),
-        ]);
+        assert!(task.symbol_map.map.keys().len() == 2);
 
-        assert_eq!(expected, c_map.id_map);
+        // Cleanup
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }
 
     #[sqlx::test]
     #[serial]
-    async fn test_id_map() -> anyhow::Result<()> {
-        let tickers = vec![
-            "HE.c.1".to_string(),
-            "HE.c.0".to_string(),
-            "LE.c.1".to_string(),
-            "LE.c.0".to_string(),
-        ];
+    async fn test_initialize_tasks_continuous() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+
+        let ids = create_futures().await?;
 
         // Test
-        let mut c_map = ContinuousMap::new();
-        c_map.build_type_map(tickers.clone());
+        let params = RetrieveParams {
+            symbols: vec!["HE.c.0".to_string(), "LE.c.1".to_string()],
+            start_ts: 1704209103644092563,
+            end_ts: 1704209903644092569,
+            schema: Schema::Mbp1,
+            dataset: Dataset::Futures,
+            stype: Stype::Continuous,
+        };
+        let getter = RecordGetter::new(1000, params, pool.clone()).await?;
 
-        // Dynamically generate synthetic symbol_map for continuous contracts
-        for (index, ticker) in tickers.iter().enumerate() {
-            let synthetic_id = 1_000_000 + index as u32; // Generate synthetic ID
-            c_map.update_id_map(ticker, synthetic_id);
+        // Validate
+        let tasks = getter.tasks.lock().await.keys().len();
+        assert_eq!(tasks, 2);
+
+        // Cleanup
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
         }
 
-        assert_eq!(c_map.get_id("HEG4", 0).unwrap(), 1000001);
-        assert_eq!(c_map.get_id("LEG4", 1).unwrap(), 1000002);
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[serial]
+    async fn test_initialize_tasks_raw() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+
+        let ids = create_futures().await?;
+
+        // Test
+        let params = RetrieveParams {
+            symbols: vec!["HEG4".to_string(), "LEG4".to_string()],
+            start_ts: 1704209103644092563,
+            end_ts: 1704209903644092569,
+            schema: Schema::Mbp1,
+            dataset: Dataset::Futures,
+            stype: Stype::Raw,
+        };
+        let getter = RecordGetter::new(1000, params, pool.clone()).await?;
+
+        // Validate
+        let tasks = getter.tasks.lock().await.keys().len();
+        assert_eq!(tasks, 1);
+
+        // Cleanup
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[serial]
+    // #[ignore]
+    async fn test_record_getter_process_metadata_continuous() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+
+        let ids = create_futures().await?;
+
+        // Test
+        let params = RetrieveParams {
+            symbols: vec!["HE.c.0".to_string(), "Le.c.0".to_string()],
+            start_ts: 1704209103644092563,
+            end_ts: 1704209903644092569,
+            schema: Schema::Mbp1,
+            dataset: Dataset::Futures,
+            stype: Stype::Continuous,
+        };
+        let getter = RecordGetter::new(1000, params, pool.clone()).await?;
+
+        let mut metadata_cursor = getter.process_metadata().await?;
+        metadata_cursor.set_position(0);
+
+        // Validate
+        let mut decoded_metadata = MetadataDecoder::new(metadata_cursor);
+        let metadata = decoded_metadata.decode()?.unwrap();
+        assert_eq!(Schema::Mbp1, metadata.schema);
+        assert_eq!(1704209103644092563, metadata.start);
+        assert_eq!(1704209903644092569, metadata.end);
+        assert_eq!(2, metadata.mappings.map.len());
+
+        // Cleanup
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[serial]
+    // #[ignore]
+    async fn test_record_getter_process_metadata_raw() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+
+        let ids = create_futures().await?;
+
+        // Test
+        let params = RetrieveParams {
+            symbols: vec!["HEG4".to_string(), "LEG4".to_string()],
+            start_ts: 1704209103644092563,
+            end_ts: 1704209903644092569,
+            schema: Schema::Mbp1,
+            dataset: Dataset::Futures,
+            stype: Stype::Raw,
+        };
+        let getter = RecordGetter::new(1000, params, pool.clone()).await?;
+
+        let mut metadata_cursor = getter.process_metadata().await?;
+        metadata_cursor.set_position(0);
+
+        // Validate
+        let mut decoded_metadata = MetadataDecoder::new(metadata_cursor);
+        let metadata = decoded_metadata.decode()?.unwrap();
+        assert_eq!(Schema::Mbp1, metadata.schema);
+        assert_eq!(1704209103644092563, metadata.start);
+        assert_eq!(1704209903644092569, metadata.end);
+        assert_eq!(2, metadata.mappings.map.len());
+
+        // Cleanup
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[serial]
+    // #[ignore]
+    async fn test_stream_records_raw() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+
+        let ids = create_futures().await?;
+
+        // Records
+        let mut records = Vec::new();
+        for id in &ids {
+            records.push(mbinary::records::Mbp1Msg {
+                hd: {
+                    mbinary::records::RecordHeader::new::<Mbp1Msg>(
+                        *id as u32,
+                        1704209103644092564,
+                        0,
+                    )
+                },
+                price: 6770,
+                size: 1,
+                action: 1,
+                side: 2,
+                depth: 0,
+                flags: 10,
+                ts_recv: 1704209103644092564,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            });
+        }
+
+        let metadata = Metadata::new(
+            Schema::Mbp1,
+            Dataset::Futures,
+            1704209103644092563,
+            1704209103644092566,
+            SymbolMap::new(),
+        );
+
+        let mut buffer = Vec::new();
+        let mut encoder = CombinedEncoder::new(&mut buffer);
+        encoder.encode_metadata(&metadata)?;
+
+        for r in records {
+            encoder
+                .encode_record(&RecordRef::from(&r))
+                .expect("Encoding failed");
+        }
+
+        let response = create_record(Extension(pool.clone()), Json(buffer))
+            .await
+            .expect("Error creating records.")
+            .into_response();
+        let mut stream = response.into_body();
+
+        // Collect streamed responses
+        while let Some(chunk) = stream.data().await {
+            match chunk {
+                Ok(bytes) => {
+                    let bytes_str = String::from_utf8_lossy(&bytes);
+
+                    match serde_json::from_str::<ApiResponse<String>>(&bytes_str) {
+                        Ok(response) => if response.status == "success" {},
+                        Err(e) => {
+                            eprintln!("Failed to parse chunk: {:?}, raw chunk: {}", e, bytes_str);
+                        }
+                    }
+                }
+                Err(e) => {
+                    panic!("Error while reading chunk: {:?}", e);
+                }
+            }
+        }
+
+        // Test
+        let params = RetrieveParams {
+            symbols: vec!["HEG4".to_string(), "LEG4".to_string()],
+            start_ts: 1704209103644092563,
+            end_ts: 1704209903644092569,
+            schema: Schema::Mbp1,
+            dataset: Dataset::Futures,
+            stype: Stype::Raw,
+        };
+        let loader = Arc::new(RecordGetter::new(1000, params, pool.clone()).await?);
+        let mut progress_stream = loader.stream().await;
+
+        // Collect streamed response
+        let mut buffer = Vec::new();
+
+        while let Some(chunk) = progress_stream.next().await {
+            match chunk {
+                Ok(bytes) => {
+                    buffer.extend_from_slice(&bytes);
+                    println!("{:?}", bytes);
+                }
+                Err(e) => panic!("Error while reading chunk: {:?}", e),
+            }
+        }
+
+        let cursor = Cursor::new(buffer);
+        let mut decoder = Decoder::new(cursor)?;
+        let decoded_metadata = decoder.metadata().unwrap();
+        println!("{:?}", decoded_metadata);
+        let records = decoder.decode()?;
+        println!("{:?}", records);
+
+        // Cleanup
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[serial]
+    // #[ignore]
+    async fn test_stream_records_continuous() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+
+        let ids = create_futures().await?;
+
+        // Records
+        let mut records = Vec::new();
+        for id in &ids {
+            records.push(mbinary::records::Mbp1Msg {
+                hd: {
+                    mbinary::records::RecordHeader::new::<Mbp1Msg>(
+                        *id as u32,
+                        1704209103644092564,
+                        0,
+                    )
+                },
+                price: 6770,
+                size: 1,
+                action: 1,
+                side: 2,
+                depth: 0,
+                flags: 10,
+                ts_recv: 1704209103644092564,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            });
+        }
+
+        let metadata = Metadata::new(
+            Schema::Mbp1,
+            Dataset::Futures,
+            1704209103644092563,
+            1704209103644092566,
+            SymbolMap::new(),
+        );
+
+        let mut buffer = Vec::new();
+        let mut encoder = CombinedEncoder::new(&mut buffer);
+        encoder.encode_metadata(&metadata)?;
+
+        for r in records {
+            encoder
+                .encode_record(&RecordRef::from(&r))
+                .expect("Encoding failed");
+        }
+
+        let response = create_record(Extension(pool.clone()), Json(buffer))
+            .await
+            .expect("Error creating records.")
+            .into_response();
+        let mut stream = response.into_body();
+
+        // Collect streamed responses
+        while let Some(chunk) = stream.data().await {
+            match chunk {
+                Ok(bytes) => {
+                    let bytes_str = String::from_utf8_lossy(&bytes);
+
+                    match serde_json::from_str::<ApiResponse<String>>(&bytes_str) {
+                        Ok(response) => if response.status == "success" {},
+                        Err(e) => {
+                            eprintln!("Failed to parse chunk: {:?}, raw chunk: {}", e, bytes_str);
+                        }
+                    }
+                }
+                Err(e) => {
+                    panic!("Error while reading chunk: {:?}", e);
+                }
+            }
+        }
+
+        // Test
+        let params = RetrieveParams {
+            symbols: vec!["HE.c.0".to_string(), "LE.c.0".to_string()],
+            start_ts: 1704209103644092563,
+            end_ts: 1704209903644092569,
+            schema: Schema::Mbp1,
+            dataset: Dataset::Futures,
+            stype: Stype::Continuous,
+        };
+        let loader = Arc::new(RecordGetter::new(1000, params, pool.clone()).await?);
+        let mut progress_stream = loader.stream().await;
+
+        // Collect streamed response
+        let mut buffer = Vec::new();
+
+        while let Some(chunk) = progress_stream.next().await {
+            match chunk {
+                Ok(bytes) => {
+                    buffer.extend_from_slice(&bytes);
+                    println!("{:?}", bytes);
+                }
+                Err(e) => panic!("Error while reading chunk: {:?}", e),
+            }
+        }
+
+        let cursor = Cursor::new(buffer);
+        let mut decoder = Decoder::new(cursor)?;
+        let decoded_metadata = decoder.metadata().unwrap();
+        println!("{:?}", decoded_metadata);
+        let records = decoder.decode()?;
+        println!("{:?}", records);
+
+        // Cleanup
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }
 }
+
+// -- Continuous
+// pub async fn get_records_continuous(&self, group: &str, params: RetrieveParams) -> Result<()> {
+//     let rtype = RType::from(params.rtype().unwrap());
+//     let from_row_fn = get_from_row_fn(rtype);
+//
+//     let mut cursor =
+//         RecordEnum::retrieve_query(&self.pool, &params, true, group.to_string()).await?;
+//
+//     while let Some(row_result) = cursor.next().await {
+//         match row_result {
+//             Ok(row) => {
+//                 let ticker: String = row.try_get("ticker")?;
+//                 let new_id = self.get_id(&ticker).await;
+//
+//                 // Use the from_row_fn here
+//                 let record = Records {
+//                     record: from_row_fn(&row, new_id)?,
+//                 };
+//                 self.heap.lock().await.push(record);
+//
+//                 // // Convert to RecordEnum and add to encoder
+//                 // let record_ref = record.to_record_ref();
+//                 // self.encoder
+//                 //     .lock()
+//                 //     .await
+//                 //     .encode_record(&record_ref)
+//                 //     .await
+//                 //     .unwrap();
+//
+//                 // Increment the batch counter
+//                 // *self.batch_counter.lock().await += 1;
+//             }
+//             Err(e) => {
+//                 error!("Error processing row: {:?}", e);
+//                 return Err(e.into());
+//             }
+//         }
+//     }
+//     Ok(())
+// }
+
+// pub async fn task_continuous(
+//     &self,
+//     group: String,
+//     mut map: HashMap<String, Vec<RollingWindow>>,
+// ) -> Result<()> {
+//     let mut params = self.retrieve_params.lock().await.clone();
+//     let final_end = params.end_ts;
+//
+//     let mut current_tickers = HashMap::new();
+//     for (ticker, obj) in &mut map {
+//         if let Some(value) = obj.pop() {
+//             current_tickers.insert(ticker.clone(), value);
+//         }
+//     }
+//
+//     // Wait for all tasks to finish
+//     while (final_end - params.start_ts) > 86_400_000_000_001 {
+//         params.end_ts = params.start_ts + 86_400_000_000_000;
+//
+//         let mut to_remove = Vec::new();
+//
+//         for (ticker, obj) in current_tickers.iter_mut() {
+//             if obj.end_time < params.start_ts {
+//                 if let Some(new_value) = map.get_mut(ticker).and_then(|v| v.pop()) {
+//                     *obj = new_value;
+//                 } else {
+//                     to_remove.push(ticker.clone());
+//                 }
+//             }
+//         }
+//
+//         // Remove tickers that have no more data
+//         for ticker in to_remove {
+//             current_tickers.remove(&ticker);
+//         }
+//
+//         // Collect values into a Vec
+//         params.symbols = current_tickers
+//             .values()
+//             .map(|obj| obj.ticker.clone()) // Extracts ticker field
+//             .collect::<Vec<String>>();
+//
+//         self.get_records_continuous(&group, params.clone()).await?;
+//
+//         params.start_ts = params.end_ts;
+//     }
+//
+//     params.end_ts = final_end;
+//     self.get_records_continuous(&group, params.clone()).await?;
+//
+//     *self.end_records.lock().await = true;
+//
+//     Ok(())
+// }
+//
+// pub async fn process_continuous_records(self: Arc<Self>) -> Result<()> {
+//     // Clone the parameters to avoid locking or mutability issues
+//     let mut params = self.retrieve_params.lock().await;
+//     let _ = params.interval_adjust_ts_start()?;
+//     let _ = params.interval_adjust_ts_end()?;
+//     drop(params);
+//
+//     let map = self.continuous_ticker_map.lock().await.clone();
+//
+//     // let rolling_schedule: Vec<RollingWindow> = RollingWindow::
+//     // let rtype = RType::from(params.rtype().unwrap());
+//
+//     let mut tasks = Vec::new();
+//
+//     for (group, map) in map {
+//         let clone_arc = Arc::clone(&self);
+//         // let heap_clone = heap.clone();
+//         tasks.push(tokio::spawn(async move {
+//             clone_arc.task_continuous(group, map).await;
+//         }));
+//     }
+//
+//     // // Spawn heap processing task
+//     // let processing_task = task::spawn(async move {
+//     //     process_heap(heap.clone()).await;
+//     // });
+//
+//     // Wait for all tasks to finish
+//     futures::future::join_all(tasks).await;
+//     // processing_task.await.unwrap();
+//     // let from_row_fn = get_from_row_fn(rtype);
+//
+//     *self.end_records.lock().await = true;
+//
+//     Ok(())
+// }
+
+// pub async fn process_continuous_records(self: Arc<Self>) -> Result<()> {
+//     // Clone the parameters to avoid locking or mutability issues
+//     let mut params = self.retrieve_params.lock().await.clone();
+//     // let rolling_schedule: Vec<RollingWindow> = RollingWindow::
+//     // let rtype = RType::from(params.rtype().unwrap());
+//
+//     // let from_row_fn = get_from_row_fn(rtype);
+//
+//     let _ = params.interval_adjust_ts_start()?;
+//     let _ = params.interval_adjust_ts_end()?;
+//     let final_end = params.end_ts;
+//
+//     while (final_end - params.start_ts) > 86_400_000_000_001 {
+//         params.end_ts = params.start_ts + 86_400_000_000_000;
+//         self.get_records_continuous(params.clone()).await?;
+//         params.start_ts = params.end_ts;
+//     }
+//
+//     params.end_ts = final_end;
+//     self.get_records_continuous(params.clone()).await?;
+//
+//     *self.end_records.lock().await = true;
+//
+//     Ok(())
+// }

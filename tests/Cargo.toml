@@ -20,7 +20,7 @@ mockito = "1.6.1"
 databento = "0.14.1"
 async-compression = { version = "0.4.11", features = ["tokio", "zstd"] }
 ctor = "0.1"
-mbinary = {version= "1.0.22"}
+mbinary = {version= "1.0.23"}
 midas-client = {version = "1.0.18"}
 midas-clilib = { git = "https://github.com/midassystems/midas-shell.git", branch =  "main" }
 

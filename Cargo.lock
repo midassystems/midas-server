@@ -1123,6 +1123,7 @@ version = "0.1.0"
 dependencies = [
  "actix-rt",
  "anyhow",
+ "async-compression",
  "async-stream",
  "async-trait",
  "axum",
@@ -1134,6 +1135,8 @@ dependencies = [
  "futures",
  "hyper 0.14.32",
  "mbinary",
+ "midas-client",
+ "midas-clilib",
  "regex",
  "reqwest 0.11.27",
  "serde",
@@ -1697,9 +1700,9 @@ checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
 
 [[package]]
 name = "mbinary"
-version = "1.0.22"
+version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bce08268c366169d415960acebb15b62790833cd264e53cd4556b22f9e21e601"
+checksum = "7fcebca1c3c2c5799b81b433689c57982a947f0e9e6fb3cbd672205b2fc53ba7"
 dependencies = [
  "bytemuck",
  "chrono",

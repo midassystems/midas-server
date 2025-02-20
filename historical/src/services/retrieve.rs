@@ -1,3 +1,6 @@
+mod heap;
+mod mutex_cursor;
+mod query_task;
 pub mod retriever;
 
 use crate::Result;

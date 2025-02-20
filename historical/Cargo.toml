@@ -19,7 +19,7 @@ sha2 = "0.10.8"
 async-stream = "0.3.5"
 futures = "0.3.30"
 bytes = "1.7.1"
-mbinary = {version= "1.0.22"}
+mbinary = {version= "1.0.23"}
 
 
 [dev-dependencies]
@@ -34,6 +34,9 @@ serial_test = "0.5"
 regex = "1.3.9"
 dbn = "0.22.1"
 databento ="0.14.1"
+midas-client = {version = "1.0.18"}
+midas-clilib = { git = "https://github.com/midassystems/midas-shell.git", branch =  "main" }
+async-compression = { version = "0.4.11", features = ["tokio", "zstd"] }
 
 [[bin]]
 name = "midas-historical"
