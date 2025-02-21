@@ -2,7 +2,6 @@ use super::heap::MinHeap;
 use super::mutex_cursor::MutexCursor;
 use super::query_task::QueryTask;
 use crate::response::ApiResponse;
-use crate::services::utils::query_symbols_map;
 use crate::{Error, Result};
 use async_stream::stream;
 use axum::http::StatusCode;
@@ -23,8 +22,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::info;
-
-use tokio::time::{sleep, Duration};
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub enum ContinuousKind {
@@ -90,12 +87,15 @@ impl Ord for Records {
 pub struct RecordGetter {
     batch_size: i64,
     end_records: Arc<Mutex<bool>>,
+    end_tasks: Arc<Mutex<bool>>,
     batch_counter: Arc<Mutex<i64>>,
     retrieve_params: Arc<Mutex<RetrieveParams>>,
     symbol_map: Arc<Mutex<SymbolMap>>,
     encoder: Arc<Mutex<AsyncRecordEncoder<MutexCursor>>>,
     tasks: Arc<Mutex<HashMap<String, Arc<Mutex<QueryTask>>>>>,
+    tasks_query_flag: Arc<Mutex<HashMap<String, Arc<Mutex<bool>>>>>,
     heap: Arc<Mutex<MinHeap<Records>>>,
+    heap_process_flag: Arc<Mutex<bool>>,
     cursor: Arc<Mutex<Cursor<Vec<u8>>>>,
     pool: PgPool,
 }
@@ -108,18 +108,18 @@ impl RecordGetter {
         let writer = MutexCursor::new(Arc::clone(&cursor));
         let encoder = AsyncRecordEncoder::new(writer);
 
-        // Raw type-specific initialization
-        // let symbol_map = query_symbols_map(&pool, &params.symbols, params.dataset).await?;
-
         let mut getter = RecordGetter {
             batch_size,
             end_records: Arc::new(Mutex::new(false)),
+            end_tasks: Arc::new(Mutex::new(false)),
             batch_counter: Arc::new(Mutex::new(0)),
             retrieve_params: Arc::new(Mutex::new(params)),
             symbol_map: Arc::new(Mutex::new(SymbolMap::new())),
             encoder: Arc::new(Mutex::new(encoder)),
             tasks: Arc::new(Mutex::new(HashMap::new())),
+            tasks_query_flag: Arc::new(Mutex::new(HashMap::new())),
             heap: Arc::new(Mutex::new(MinHeap::new())),
+            heap_process_flag: Arc::new(Mutex::new(false)),
             cursor,
             pool,
         };
@@ -132,26 +132,33 @@ impl RecordGetter {
     pub async fn initialize_tasks(&mut self) -> Result<()> {
         let params = self.retrieve_params.lock().await.clone();
         let mut tasks = self.tasks.lock().await;
+        let mut tasks_query_flag = self.tasks_query_flag.lock().await;
 
         match params.stype {
             Stype::Raw => {
                 // Only one task for raw
                 let task_id = "raw".to_string();
                 let tickers = params.symbols.clone();
+                let query_flag = Arc::new(Mutex::new(false));
+
                 let task = QueryTask::new(
                     task_id.clone(),
+                    0,
                     params.clone(),
                     tickers,
                     0,
                     ContinuousKind::None,
                     self.pool.clone(),
-                    Arc::clone(&self.heap), // Pass shared heap reference to task
+                    Arc::clone(&self.heap),
+                    query_flag.clone(),
                 )
                 .await?;
 
-                tasks.insert(task_id, Arc::new(Mutex::new(task)));
+                tasks.insert(task_id.clone(), Arc::new(Mutex::new(task)));
+                tasks_query_flag.insert(task_id, query_flag);
             }
             Stype::Continuous => {
+                let mut initial_continuous_id: usize = 1_000_000;
                 let mut ticker_map: HashMap<String, Vec<String>> = HashMap::new();
 
                 for ticker in &params.symbols {
@@ -168,20 +175,26 @@ impl RecordGetter {
                 for (task_id, tickers) in ticker_map {
                     if let Some((kind, rank_str)) = task_id.split_once('.') {
                         if let Ok(rank) = rank_str.parse::<i32>() {
-                            // Insert into the nested HashMap
+                            let num_tickers = tickers.len();
+                            let query_flag = Arc::new(Mutex::new(false));
 
+                            // Insert into the nested HashMap
                             let task = QueryTask::new(
                                 task_id.clone(),
+                                initial_continuous_id as u32,
                                 params.clone(),
                                 tickers,
                                 rank,
                                 ContinuousKind::from_str(kind)?,
                                 self.pool.clone(),
-                                Arc::clone(&self.heap), // Pass shared heap reference to task
+                                Arc::clone(&self.heap),
+                                query_flag.clone(),
                             )
                             .await?;
 
-                            tasks.insert(task_id, Arc::new(Mutex::new(task)));
+                            tasks.insert(task_id.clone(), Arc::new(Mutex::new(task)));
+                            tasks_query_flag.insert(task_id, query_flag);
+                            initial_continuous_id += num_tickers;
                         }
                     }
                 }
@@ -191,19 +204,18 @@ impl RecordGetter {
         Ok(())
     }
 
-    // -- Raw symbols
     pub async fn process_metadata(&self) -> Result<Cursor<Vec<u8>>> {
         let mut metadata_cursor = Cursor::new(Vec::new());
         let mut metadata_encoder = MetadataEncoder::new(&mut metadata_cursor);
 
         let retrieve_params: RetrieveParams = self.retrieve_params.lock().await.clone();
 
-        let tasks = self.tasks.lock().await; // Lock task collection
+        let tasks = self.tasks.lock().await;
 
         for task in tasks.values() {
-            let task = task.lock().await; // Lock each task
+            let task = task.lock().await;
 
-            // Merge symbol maps (Assuming SymbolMap has a `merge` method)
+            // Merge symbol maps
             self.symbol_map.lock().await.merge(&task.symbol_map);
         }
 
@@ -221,98 +233,136 @@ impl RecordGetter {
 
     pub async fn process_heap(self: Arc<Self>) -> Result<()> {
         loop {
-            let mut heap = self.heap.lock().await;
+            if !*self.heap_process_flag.lock().await {
+                tokio::task::yield_now().await;
+            } else {
+                let heap = self.heap.lock().await;
 
-            // If the heap is empty and we have finished processing all records, break the loop
-            if heap.is_empty() {
-                if *self.end_records.lock().await {
-                    break;
+                if heap.is_empty() {
+                    info!("heap empty");
+
+                    if *self.end_tasks.lock().await {
+                        info!("end  of recorsd is set");
+                        drop(heap);
+                        *self.end_records.lock().await = true;
+                        break;
+                    } else {
+                        info!("flipping hep flags");
+                        let flags = self.tasks_query_flag.lock().await;
+
+                        for (_, flag) in flags.iter() {
+                            *flag.lock().await = false;
+                        }
+                        *self.heap_process_flag.lock().await = false;
+                    }
                 }
-                drop(heap); // Release lock before sleeping
-                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-                continue;
+                drop(heap);
+
+                // Pop the record with the smallest timestamp (heap behavior)
+                let record = {
+                    let mut heap = self.heap.lock().await;
+                    heap.pop()
+                };
+
+                if let Some(item) = record {
+                    let record_ref = item.record.to_record_ref();
+                    self.encoder.lock().await.encode_record(&record_ref).await?;
+
+                    // Increment batch counter
+                    *self.batch_counter.lock().await += 1;
+                }
             }
-
-            // Pop the record with the smallest timestamp (heap behavior)
-            let heap_item = heap.pop().unwrap();
-            drop(heap); // Release the lock before processing
-
-            // Process the record
-            let record_ref = heap_item.record.to_record_ref();
-
-            self.encoder
-                .lock()
-                .await
-                .encode_record(&record_ref)
-                .await
-                .unwrap();
-
-            // Increment batch counter
-            *self.batch_counter.lock().await += 1;
         }
-
         Ok(())
     }
 
     pub async fn stream(self: Arc<Self>) -> Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>> {
         let p_stream = stream! {
-                // Stream metadata first
-                match self.process_metadata().await {
-                    Ok(metadata_cursor) => {
-                        let buffer_ref = metadata_cursor.get_ref();
-                        let bytes = Bytes::copy_from_slice(buffer_ref);
-                        yield Ok::<Bytes, Error>(bytes);
-                    }
-                    Err(e) => {
-                        let response = ApiResponse::new(
-                            "failed",
-                            &format!("{:?}", e),
-                            StatusCode::CONFLICT,
-                            "".to_string(),
-                        );
-                        yield Ok(response.bytes());
-                        return;
-                    }
-                };
+            // Stream metadata first
+            match self.process_metadata().await {
+                Ok(metadata_cursor) => {
+                    let buffer_ref = metadata_cursor.get_ref();
+                    let bytes = Bytes::copy_from_slice(buffer_ref);
+                    yield Ok::<Bytes, Error>(bytes);
+                }
+                Err(e) => {
+                    let response = ApiResponse::new(
+                        "failed",
+                        &format!("{:?}", e),
+                        StatusCode::CONFLICT,
+                        "".to_string(),
+                    );
+                    yield Ok(response.bytes());
+                    return;
+                }
+            };
 
-            // Spawn min heap process
-            let record_getter = Arc::clone(&self);
-            let _records_processing = tokio::spawn(async move {
-                record_getter.process_heap().await
-            });
-
-            // Spanw task processes
+            // Spawn task processes
             let mut handles = Vec::new();
-            let tasks = self.tasks.lock().await; // Lock the task map
+            let tasks = self.tasks.lock().await;
 
             for task in tasks.values() {
                 let task_arc = Arc::clone(task);
 
                 let handle = tokio::spawn(async move {
-                    let mut task = task_arc.lock().await; // Lock the mutex before calling process_records
-                    task.process_records().await;
+                    let mut task = task_arc.lock().await;
+                    let _= task.process_records().await;
                 });
                 handles.push(handle);
             }
 
+            // Spawn query manager
+            let query_handler = Arc::clone(&self);
+            let _query_manager = tokio::spawn(async move {
+                loop {
+                    let all_queried = {
+                        let flags = query_handler.tasks_query_flag.lock().await;
+                        let mut done = true;
+                        for (_, flag) in flags.iter() {
+                            if !*flag.lock().await {
+                                done = false;
+                                break;
+                            }
+                        }
+                        done
+                    };
+
+                    // If all tasks  haev queried, set heap_process_flag and process heap
+                    if all_queried {
+                        // Set heap_process_flag to true, allowing heap to process
+                        *query_handler.heap_process_flag.lock().await = true;
+
+                        // Wait until the heap has processed
+                        while *query_handler.heap_process_flag.lock().await {
+                            tokio::task::yield_now().await;
+                        }
+                    }
+                }
+            });
+
+
+            // Spawn task manager
             let task_handler = Arc::clone(&self);
-            let task_manager = tokio::spawn(async move {
+            let _task_manager = tokio::spawn(async move {
+
                 // Wait for all record-processing tasks
                 for handle in handles {
                     let _ = handle.await;
                 }
 
-                // Signal that records are done
-                *task_handler.end_records.lock().await = true;
-                println!("All records processed, signaling heap to finalize.");
+                // Signal that tasks are done
+                *task_handler.end_tasks.lock().await = true;
             });
 
-
+            // Spawn heap process
+            let record_getter = Arc::clone(&self);
+            let _records_processing = tokio::spawn(async move {
+                record_getter.process_heap().await
+            });
 
             // Stream record batches while processing continues
             loop {
                 let end_records = self.end_records.lock().await;
-                // println!("{}", end_records);
                 if *end_records {
                     break;
                 }
@@ -330,7 +380,6 @@ impl RecordGetter {
                         let cursor = self.cursor.lock().await;
                         Bytes::copy_from_slice(cursor.get_ref())
                     };
-                    info!("Sending buffer, size: {:?}", batch_bytes.len());
                     yield Ok::<Bytes, Error>(batch_bytes);
 
                     // Reset cursor and batch counter
@@ -348,12 +397,9 @@ impl RecordGetter {
                 tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
             }
 
-
-            // println!("shoudle be retunrign records remainign ehre");
             // Send any remaining data that wasn't part of a full batch
             if !self.cursor.lock().await.get_ref().is_empty() {
                 let remaining_bytes = Bytes::copy_from_slice(self.cursor.lock().await.get_ref());
-                println!("Sending remaining buffer, size: {:?}", remaining_bytes.len());
                 yield Ok::<Bytes, Error>(remaining_bytes);
             }
 
@@ -363,124 +409,6 @@ impl RecordGetter {
 
         Box::pin(p_stream)
     }
-
-    // pub async fn stream_continuous(
-    //     self: Arc<Self>,
-    // ) -> Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>> {
-    //     let p_stream = stream! {
-    //         // Pull the symbols for mutation
-    //
-    //         // Stream metadata first
-    //         match self.process_metadata().await {
-    //             Ok(metadata_cursor) => {
-    //                 let buffer_ref = metadata_cursor.get_ref();
-    //                 let bytes = Bytes::copy_from_slice(buffer_ref);
-    //                 yield Ok::<Bytes, Error>(bytes);
-    //             }
-    //             Err(e) => {
-    //                 let response = ApiResponse::new(
-    //                     "failed",
-    //                     &format!("{:?}", e),
-    //                     StatusCode::CONFLICT,
-    //                     "".to_string(),
-    //                 );
-    //                 yield Ok(response.bytes());
-    //                 return;
-    //             }
-    //         };
-    //
-    //                     // Spawn a task for each query task to process records concurrently
-    //         let mut handles = Vec::new();
-    //         let tasks = self.tasks.lock().await; // Lock the task map
-    //
-    //         for task in tasks.values() {
-    //             let task_arc = Arc::clone(task);
-    //
-    //             let handle = tokio::spawn(async move {
-    //                 let mut task = task_arc.lock().await; // Lock the mutex before calling process_records
-    //                 task.process_records().await;
-    //             });
-    //
-    //             handles.push(handle);
-    //         }
-    //
-    //
-    //         // Wait for all tasks to complete
-    //         for handle in handles {
-    //             if let Err(e) = handle.await {
-    //                 let response = ApiResponse::new(
-    //                     "failed",
-    //                     &format!("Task error: {:?}", e),
-    //                     StatusCode::INTERNAL_SERVER_ERROR,
-    //                     "".to_string(),
-    //                 );
-    //                 yield Ok(response.bytes());
-    //                 return;
-    //             }
-    //         }
-    //
-    //         // Spaw
-    //         loop {
-    //             let end_records = self.end_records.lock().await;
-    //             if *end_records {
-    //                 break;
-    //             }
-    //
-    //             let mut batch_counter = self.batch_counter.lock().await;
-    //             if *batch_counter > self.batch_size {
-    //                 let batch_bytes = {
-    //                     self.encoder.lock()
-    //                             .await
-    //                             .flush()
-    //                             .await
-    //                             .unwrap();
-    //
-    //                     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await; // Ensure async write settles
-    //
-    //
-    //                     let cursor = self.cursor.lock().await;
-    //                     Bytes::copy_from_slice(cursor.get_ref())
-    //                 };
-    //
-    //                 info!("Sending buffer, size: {:?}", batch_bytes.len());
-    //                 yield Ok::<Bytes, Error>(batch_bytes);
-    //
-    //                 // Reset cursor and batch counter
-    //                 {
-    //                     let mut cursor = self.cursor.lock().await;
-    //                     cursor.get_mut().clear();
-    //                     cursor.set_position(0);
-    //                 }
-    //                 *batch_counter = 0;
-    //             }
-    //
-    //             drop(batch_counter);
-    //             drop(end_records);
-    //
-    //             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-    //         }
-    //
-    //         // Send any remaining data that wasn't part of a full batch
-    //         if !self.cursor.lock().await.get_ref().is_empty() {
-    //             let remaining_bytes = Bytes::copy_from_slice(self.cursor.lock().await.get_ref());
-    //             info!("Sending remaining buffer, size: {:?}", remaining_bytes.len());
-    //             yield Ok::<Bytes, Error>(remaining_bytes);
-    //         }
-    //
-    //         info!("Finished streaming all batches");
-    //         return;
-    //     };
-    //
-    //     Box::pin(p_stream)
-    // }
-
-    // pub async fn stream(self: Arc<Self>) -> Pin<Box<dyn Stream<Item = Result<Bytes>> + Send>> {
-    //     if self.retrieve_params.lock().await.stype == Stype::Continuous {
-    //         self.stream_continuous().await
-    //     } else {
-    //         self.stream_rawsymbols().await
-    //     }
-    // }
 }
 
 #[cfg(test)]
@@ -492,8 +420,7 @@ mod test {
     use axum::response::IntoResponse;
     use axum::{Extension, Json};
     use dotenv;
-    use futures::pin_mut;
-    use futures::stream::StreamExt; // Use StreamExt from futures
+    use futures::stream::StreamExt;
     use hyper::body::HttpBody as _;
     use mbinary::decode::{Decoder, MetadataDecoder};
     use mbinary::encode::CombinedEncoder;
@@ -501,7 +428,7 @@ mod test {
     use mbinary::enums::{Schema, Stype};
     use mbinary::metadata::Metadata;
     use mbinary::record_ref::RecordRef;
-    use mbinary::records::{BidAskPair, Mbp1Msg, Record, RecordHeader};
+    use mbinary::records::{BidAskPair, Mbp1Msg};
     use mbinary::symbols::Instrument;
     use mbinary::vendors::Vendors;
     use mbinary::vendors::{DatabentoData, VendorData};
@@ -729,14 +656,18 @@ mod test {
 
         // Test
         let heap = Arc::new(Mutex::new(MinHeap::new()));
+        let queried_flag = Arc::new(Mutex::new(false));
+
         let task = QueryTask::new(
             "raw".to_string(),
+            0,
             params,
             tickers,
             0,
             ContinuousKind::None,
             pool,
             heap,
+            queried_flag,
         )
         .await?;
 
@@ -771,24 +702,30 @@ mod test {
 
         // Test
         let heap = Arc::new(Mutex::new(MinHeap::new()));
+        let queried_flag = Arc::new(Mutex::new(false));
+
         let task = QueryTask::new(
             "c.0".to_string(),
+            1_00,
             params.clone(),
             tickers.clone(),
             0,
             ContinuousKind::Calendar,
             pool.clone(),
             Arc::clone(&heap),
+            Arc::clone(&queried_flag),
         )
         .await?;
         let _task2 = QueryTask::new(
             "c.1".to_string(),
+            1_100,
             params,
             tickers,
             1,
             ContinuousKind::Calendar,
             pool.clone(),
             Arc::clone(&heap),
+            Arc::clone(&queried_flag),
         )
         .await?;
 
@@ -1046,18 +983,18 @@ mod test {
             match chunk {
                 Ok(bytes) => {
                     buffer.extend_from_slice(&bytes);
-                    println!("{:?}", bytes);
                 }
                 Err(e) => panic!("Error while reading chunk: {:?}", e),
             }
         }
 
+        // Validate
         let cursor = Cursor::new(buffer);
         let mut decoder = Decoder::new(cursor)?;
         let decoded_metadata = decoder.metadata().unwrap();
-        println!("{:?}", decoded_metadata);
         let records = decoder.decode()?;
-        println!("{:?}", records);
+        assert_eq!(2, decoded_metadata.mappings.map.len());
+        assert!(records.len() > 0);
 
         // Cleanup
         for id in ids {
@@ -1170,18 +1107,18 @@ mod test {
             match chunk {
                 Ok(bytes) => {
                     buffer.extend_from_slice(&bytes);
-                    println!("{:?}", bytes);
                 }
                 Err(e) => panic!("Error while reading chunk: {:?}", e),
             }
         }
 
+        // Validate
         let cursor = Cursor::new(buffer);
         let mut decoder = Decoder::new(cursor)?;
         let decoded_metadata = decoder.metadata().unwrap();
-        println!("{:?}", decoded_metadata);
         let records = decoder.decode()?;
-        println!("{:?}", records);
+        assert_eq!(2, decoded_metadata.mappings.map.len());
+        assert!(records.len() > 0);
 
         // Cleanup
         for id in ids {
@@ -1191,162 +1128,3 @@ mod test {
         Ok(())
     }
 }
-
-// -- Continuous
-// pub async fn get_records_continuous(&self, group: &str, params: RetrieveParams) -> Result<()> {
-//     let rtype = RType::from(params.rtype().unwrap());
-//     let from_row_fn = get_from_row_fn(rtype);
-//
-//     let mut cursor =
-//         RecordEnum::retrieve_query(&self.pool, &params, true, group.to_string()).await?;
-//
-//     while let Some(row_result) = cursor.next().await {
-//         match row_result {
-//             Ok(row) => {
-//                 let ticker: String = row.try_get("ticker")?;
-//                 let new_id = self.get_id(&ticker).await;
-//
-//                 // Use the from_row_fn here
-//                 let record = Records {
-//                     record: from_row_fn(&row, new_id)?,
-//                 };
-//                 self.heap.lock().await.push(record);
-//
-//                 // // Convert to RecordEnum and add to encoder
-//                 // let record_ref = record.to_record_ref();
-//                 // self.encoder
-//                 //     .lock()
-//                 //     .await
-//                 //     .encode_record(&record_ref)
-//                 //     .await
-//                 //     .unwrap();
-//
-//                 // Increment the batch counter
-//                 // *self.batch_counter.lock().await += 1;
-//             }
-//             Err(e) => {
-//                 error!("Error processing row: {:?}", e);
-//                 return Err(e.into());
-//             }
-//         }
-//     }
-//     Ok(())
-// }
-
-// pub async fn task_continuous(
-//     &self,
-//     group: String,
-//     mut map: HashMap<String, Vec<RollingWindow>>,
-// ) -> Result<()> {
-//     let mut params = self.retrieve_params.lock().await.clone();
-//     let final_end = params.end_ts;
-//
-//     let mut current_tickers = HashMap::new();
-//     for (ticker, obj) in &mut map {
-//         if let Some(value) = obj.pop() {
-//             current_tickers.insert(ticker.clone(), value);
-//         }
-//     }
-//
-//     // Wait for all tasks to finish
-//     while (final_end - params.start_ts) > 86_400_000_000_001 {
-//         params.end_ts = params.start_ts + 86_400_000_000_000;
-//
-//         let mut to_remove = Vec::new();
-//
-//         for (ticker, obj) in current_tickers.iter_mut() {
-//             if obj.end_time < params.start_ts {
-//                 if let Some(new_value) = map.get_mut(ticker).and_then(|v| v.pop()) {
-//                     *obj = new_value;
-//                 } else {
-//                     to_remove.push(ticker.clone());
-//                 }
-//             }
-//         }
-//
-//         // Remove tickers that have no more data
-//         for ticker in to_remove {
-//             current_tickers.remove(&ticker);
-//         }
-//
-//         // Collect values into a Vec
-//         params.symbols = current_tickers
-//             .values()
-//             .map(|obj| obj.ticker.clone()) // Extracts ticker field
-//             .collect::<Vec<String>>();
-//
-//         self.get_records_continuous(&group, params.clone()).await?;
-//
-//         params.start_ts = params.end_ts;
-//     }
-//
-//     params.end_ts = final_end;
-//     self.get_records_continuous(&group, params.clone()).await?;
-//
-//     *self.end_records.lock().await = true;
-//
-//     Ok(())
-// }
-//
-// pub async fn process_continuous_records(self: Arc<Self>) -> Result<()> {
-//     // Clone the parameters to avoid locking or mutability issues
-//     let mut params = self.retrieve_params.lock().await;
-//     let _ = params.interval_adjust_ts_start()?;
-//     let _ = params.interval_adjust_ts_end()?;
-//     drop(params);
-//
-//     let map = self.continuous_ticker_map.lock().await.clone();
-//
-//     // let rolling_schedule: Vec<RollingWindow> = RollingWindow::
-//     // let rtype = RType::from(params.rtype().unwrap());
-//
-//     let mut tasks = Vec::new();
-//
-//     for (group, map) in map {
-//         let clone_arc = Arc::clone(&self);
-//         // let heap_clone = heap.clone();
-//         tasks.push(tokio::spawn(async move {
-//             clone_arc.task_continuous(group, map).await;
-//         }));
-//     }
-//
-//     // // Spawn heap processing task
-//     // let processing_task = task::spawn(async move {
-//     //     process_heap(heap.clone()).await;
-//     // });
-//
-//     // Wait for all tasks to finish
-//     futures::future::join_all(tasks).await;
-//     // processing_task.await.unwrap();
-//     // let from_row_fn = get_from_row_fn(rtype);
-//
-//     *self.end_records.lock().await = true;
-//
-//     Ok(())
-// }
-
-// pub async fn process_continuous_records(self: Arc<Self>) -> Result<()> {
-//     // Clone the parameters to avoid locking or mutability issues
-//     let mut params = self.retrieve_params.lock().await.clone();
-//     // let rolling_schedule: Vec<RollingWindow> = RollingWindow::
-//     // let rtype = RType::from(params.rtype().unwrap());
-//
-//     // let from_row_fn = get_from_row_fn(rtype);
-//
-//     let _ = params.interval_adjust_ts_start()?;
-//     let _ = params.interval_adjust_ts_end()?;
-//     let final_end = params.end_ts;
-//
-//     while (final_end - params.start_ts) > 86_400_000_000_001 {
-//         params.end_ts = params.start_ts + 86_400_000_000_000;
-//         self.get_records_continuous(params.clone()).await?;
-//         params.start_ts = params.end_ts;
-//     }
-//
-//     params.end_ts = final_end;
-//     self.get_records_continuous(params.clone()).await?;
-//
-//     *self.end_records.lock().await = true;
-//
-//     Ok(())
-// }

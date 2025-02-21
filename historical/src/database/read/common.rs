@@ -2815,7 +2815,9 @@ mod test {
         .await
         .expect("Error on retrieve records.");
 
-        println!("{:?}", vec);
+        //Validate
+        assert!(vec["HE.c.0"].len() == 2);
+        assert!(vec["LE.c.0"].len() == 2);
 
         // Cleanup
         delete_instrument(instrument_id)
@@ -2839,7 +2841,7 @@ mod test {
 
     #[sqlx::test]
     #[serial]
-    // #[ignore]
+    #[ignore]
     async fn test_retrieve_rolling_window_volume() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
@@ -2910,7 +2912,8 @@ mod test {
         .await
         .expect("Error on retrieve records.");
 
-        println!("{:?}", vec);
+        // Validate
+        assert!(vec["HE.c.0"].len() == 3);
 
         // Cleanup
         delete_instrument(instrument_id)

@@ -1,6 +1,5 @@
 use super::heap::MinHeap;
 use super::retriever::{ContinuousKind, Records};
-
 use crate::database::read::common::{RecordsQuery, RollingWindow};
 use crate::database::read::rows::get_from_row_fn;
 use crate::services::utils::query_symbols_map;
@@ -18,6 +17,7 @@ use tracing::error;
 #[derive(Debug)]
 pub struct QueryTask {
     id: String,
+    continuous_id: u32,
     stype: Stype,
     final_end: i64,
     tickers: Vec<String>,
@@ -27,18 +27,20 @@ pub struct QueryTask {
     id_map: HashMap<String, u32>,
     heap: Arc<Mutex<MinHeap<Records>>>,
     pool: PgPool,
-    // pub end_flag: bool,
+    pub queried_flag: Arc<Mutex<bool>>,
 }
 
 impl QueryTask {
     pub async fn new(
         id: String,
+        continuous_id: u32,
         mut params: RetrieveParams,
         tickers: Vec<String>,
         rank: i32,
         kind: ContinuousKind,
         pool: PgPool,
         heap: Arc<Mutex<MinHeap<Records>>>,
+        queried_flag: Arc<Mutex<bool>>,
     ) -> Result<Self> {
         // Adjust start/end to be start/end of respective interval
         let _ = params.interval_adjust_ts_start()?;
@@ -49,19 +51,19 @@ impl QueryTask {
         // Initialize the QueryTask struct
         let mut task = QueryTask {
             id,
+            continuous_id,
             stype,
             final_end,
             tickers,
-            // end_flag: false,
             symbol_map: SymbolMap::new(),
             params,
             continuous_map: HashMap::new(),
             id_map: HashMap::new(),
             heap,
             pool,
+            queried_flag,
         };
 
-        // Initialize based on stype (Raw or Continuous)
         task.initialize(rank, kind).await?;
 
         Ok(task)
@@ -69,7 +71,6 @@ impl QueryTask {
     pub async fn initialize(&mut self, rank: i32, kind: ContinuousKind) -> Result<()> {
         match self.params.stype {
             Stype::Raw => {
-                // Raw type-specific initialization
                 self.symbol_map =
                     query_symbols_map(&self.pool, &self.params.symbols, self.params.dataset)
                         .await?;
@@ -77,7 +78,7 @@ impl QueryTask {
             Stype::Continuous => {
                 // Build the id_map and continuous_map for continuous tasks
                 for (index, ticker) in self.tickers.iter().enumerate() {
-                    let synthetic_id = 1_000_000 + index as u32; // Generate synthetic ID
+                    let synthetic_id = self.continuous_id + index as u32; // Generate synthetic ID
                     self.id_map.insert(ticker.to_string(), synthetic_id);
                     self.symbol_map.add_instrument(ticker, synthetic_id);
                 }
@@ -110,6 +111,10 @@ impl QueryTask {
         let rtype = RType::from(self.params.rtype().unwrap());
         let from_row_fn = get_from_row_fn(rtype);
 
+        while *self.queried_flag.lock().await {
+            tokio::task::yield_now().await;
+        }
+
         let mut cursor = RecordEnum::retrieve_query(
             &self.pool,
             &self.params,
@@ -120,37 +125,40 @@ impl QueryTask {
 
         while let Some(row_result) = cursor.next().await {
             match row_result {
-                Ok(row) => {
-                    match self.stype {
-                        Stype::Raw => {
-                            // Use the from_row_fn here
-                            let record = Records {
-                                record: from_row_fn(&row, None)?,
-                            };
-                            // println!("{:?}", record);
+                Ok(row) => match self.stype {
+                    Stype::Raw => {
+                        let record = Records {
+                            record: from_row_fn(&row, None)?,
+                        };
 
-                            self.heap.lock().await.push(record);
-                        }
-                        Stype::Continuous => {
-                            let ticker: String = row.try_get("ticker")?;
-                            let new_id = self.id_map.get(&ticker).copied();
-
-                            // Use the from_row_fn here
-                            let record = Records {
-                                record: from_row_fn(&row, new_id)?,
-                            };
-                            // println!("{:?}", record);
-
-                            self.heap.lock().await.push(record);
+                        {
+                            let mut heap = self.heap.lock().await;
+                            heap.push(record);
                         }
                     }
-                }
+                    Stype::Continuous => {
+                        let ticker: String = row.try_get("ticker")?;
+                        let new_id = self.id_map.get(&ticker).copied();
+
+                        let record = Records {
+                            record: from_row_fn(&row, new_id)?,
+                        };
+
+                        {
+                            let mut heap = self.heap.lock().await;
+                            heap.push(record);
+                        }
+                    }
+                },
                 Err(e) => {
                     error!("Error processing row: {:?}", e);
                     return Err(e.into());
                 }
             }
         }
+
+        *self.queried_flag.lock().await = true;
+
         Ok(())
     }
 
@@ -163,8 +171,6 @@ impl QueryTask {
 
         self.params.end_ts = self.final_end;
         self.get_records(false).await?;
-
-        // self.end_flag = true;
 
         Ok(())
     }
@@ -195,8 +201,6 @@ impl QueryTask {
     }
 
     pub async fn process_records_continuous(&mut self) -> Result<()> {
-        // let final_end = params.end_ts;
-
         let mut current_tickers = HashMap::new();
         for (ticker, obj) in &mut self.continuous_map {
             if let Some(value) = obj.pop() {
@@ -218,8 +222,6 @@ impl QueryTask {
 
         self.params.end_ts = self.final_end;
         self.get_records(true).await?;
-
-        // self.end_flag = true;
 
         Ok(())
     }
@@ -611,14 +613,18 @@ mod test {
         };
 
         let heap = Arc::new(Mutex::new(MinHeap::new()));
+        let queried_flag = Arc::new(Mutex::new(false));
+
         let mut task = QueryTask::new(
             "raw".to_string(),
+            0,
             params.clone(),
             params.symbols.clone(),
             0,
             ContinuousKind::None,
             pool.clone(),
             Arc::clone(&heap),
+            Arc::clone(&queried_flag),
         )
         .await?;
 
@@ -634,7 +640,6 @@ mod test {
         if let Some(record) = record2 {
             assert_eq!(record.record.header().instrument_id, ids[1] as u32)
         }
-        // assert!(task.end_flag);
 
         // Cleanup
         for id in ids {
@@ -733,14 +738,18 @@ mod test {
         };
 
         let heap = Arc::new(Mutex::new(MinHeap::new()));
+        let queried_flag = Arc::new(Mutex::new(false));
+
         let mut task = QueryTask::new(
             "raw".to_string(),
+            0,
             params.clone(),
             params.symbols.clone(),
             0,
             ContinuousKind::None,
             pool.clone(),
             Arc::clone(&heap),
+            Arc::clone(&queried_flag),
         )
         .await?;
 
@@ -856,14 +865,18 @@ mod test {
         };
 
         let heap = Arc::new(Mutex::new(MinHeap::new()));
+        let queried_flag = Arc::new(Mutex::new(false));
+
         let mut task = QueryTask::new(
             "c.0".to_string(),
+            1_000_000,
             params.clone(),
             vec!["HE.c.0".to_string(), "LE.c.0".to_string()],
             0,
             ContinuousKind::Calendar,
             pool.clone(),
             Arc::clone(&heap),
+            Arc::clone(&queried_flag),
         )
         .await?;
 
@@ -881,7 +894,6 @@ mod test {
             1000000,
             record1.unwrap().record.header().instrument_id as i32
         );
-        // assert!(task.end_flag);
 
         // Cleanup
         for id in ids {

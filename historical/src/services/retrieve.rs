@@ -283,7 +283,10 @@ mod test {
         let mut buffer = Vec::new();
         while let Some(chunk) = body.data().await {
             match chunk {
-                Ok(bytes) => buffer.extend_from_slice(&bytes),
+                Ok(bytes) => {
+                    println!("{:?}", bytes);
+                    buffer.extend_from_slice(&bytes);
+                }
                 Err(e) => panic!("Error while reading chunk: {:?}", e),
             }
         }

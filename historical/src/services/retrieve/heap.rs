@@ -64,7 +64,6 @@ impl<T: Ord> MinHeap<T> {
         if self.data.len() == 1 {
             return self.data.pop();
         }
-
         let len = self.data.len();
         self.data.swap(0, len - 1);
 
@@ -72,22 +71,27 @@ impl<T: Ord> MinHeap<T> {
         self.heapify_down(0);
         value
     }
-
     fn heapify_down(&mut self, mut index: usize) {
         loop {
             let left = self.left_child(index);
             let right = self.right_child(index);
+            let mut smallest = index;
 
-            if let Some(left_index) = left {
-                if self.data[left_index] < self.data[index] {
-                    self.data.swap(index, left_index);
-                    index = left_index;
+            if let Some(left_idx) = left {
+                if self.data[left_idx] < self.data[smallest] {
+                    smallest = left_idx;
                 }
-            } else if let Some(right_index) = right {
-                if self.data[right_index] < self.data[index] {
-                    self.data.swap(index, right_index);
-                    index = right_index;
+            }
+
+            if let Some(right_idx) = right {
+                if self.data[right_idx] < self.data[smallest] {
+                    smallest = right_idx;
                 }
+            }
+
+            if smallest != index {
+                self.data.swap(index, smallest);
+                index = smallest;
             } else {
                 break;
             }
@@ -121,9 +125,9 @@ mod tests {
         heap.push(20);
         heap.push(2);
 
-        println!("Min: {:?}", heap.pop()); // Some(2)
-        println!("Min: {:?}", heap.pop()); // Some(5)
-        println!("Min: {:?}", heap.pop()); // Some(10)
-        println!("{:?}", heap); // MinHeap { data: [2, 5, 20, 10] }
+        assert_eq!(2, heap.pop().unwrap());
+        assert_eq!(5, heap.pop().unwrap());
+        assert_eq!(10, heap.pop().unwrap());
+        assert_eq!(20, heap.pop().unwrap());
     }
 }

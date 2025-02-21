@@ -1123,7 +1123,6 @@ version = "0.1.0"
 dependencies = [
  "actix-rt",
  "anyhow",
- "async-compression",
  "async-stream",
  "async-trait",
  "axum",
@@ -1135,8 +1134,6 @@ dependencies = [
  "futures",
  "hyper 0.14.32",
  "mbinary",
- "midas-client",
- "midas-clilib",
  "regex",
  "reqwest 0.11.27",
  "serde",

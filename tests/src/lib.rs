@@ -63,6 +63,33 @@ pub async fn dbn_raw_count(dbn_filepath: PathBuf) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub async fn chronological_check(mbinary_filepath: &PathBuf) -> anyhow::Result<()> {
+    let mut mbinary_decoder = read_mbinary_file(mbinary_filepath).await?;
+
+    let mbinary_output_file = "chronological_records.txt";
+    let mut mbinary_file = File::create(mbinary_output_file).await?;
+
+    let mut last_ts: u64 = 0;
+
+    let mut old_record = None;
+    // Write MBN records to file
+    while let Some(mbinary_record) = mbinary_decoder.decode_ref().await? {
+        let record_enum = RecordEnum::from_ref(mbinary_record)?;
+        let new_ts = record_enum.timestamp();
+        if let Some(old_record) = old_record {
+            mbinary_file
+                .write_all(format!("old : {:?}\n new {:?}\n", old_record, record_enum).as_bytes())
+                .await?;
+        };
+
+        assert!(new_ts >= last_ts);
+        last_ts = new_ts;
+        old_record = Some(record_enum);
+    }
+
+    Ok(())
+}
+
 pub async fn compare_dbn_raw_output(
     dbn_filepath: PathBuf,
     mbinary_filepath: &PathBuf,
@@ -354,30 +381,6 @@ mod tests {
         Ok(())
     }
 
-    // // A function to seed the database (runs once before tests)
-    // async fn upload_data(file_path: String) {
-    //     dotenv().ok();
-    //
-    //     // create_tickers().await.expect("Error creating tickers");
-    //
-    //     // Parameters
-    //     let dataset = Dataset::Futures;
-    //     let context = midas_clilib::context::Context::init().expect("Error on context creation.");
-    //
-    //     // Mbp1
-    //     let upload_cmd = midas_clilib::cli::vendors::databento::DatabentoCommands::Upload {
-    //         dataset: dataset.as_str().to_string(),
-    //         dbn_filepath: file_path,
-    //         dbn_downloadtype: "stream".to_string(),
-    //         midas_filepath: "system_tests_data.bin".to_string(),
-    //     };
-    //
-    //     upload_cmd
-    //         .process_command(&context)
-    //         .await
-    //         .expect("Error on upload.");
-    // }
-
     #[tokio::test]
     #[serial]
     // #[ignore]
@@ -409,7 +412,7 @@ mod tests {
         test_raw_records_volume().await?;
 
         // Continuous Calendar
-        // test_continuous_volume().await?;
+        test_continuous_volume().await?;
 
         // Rolllover flag
         // test_rollover_volume().await?;
@@ -452,7 +455,7 @@ mod tests {
         test_raw_records_calendar().await?;
 
         // Continuous Volume
-        // test_continuous_calendar().await?;
+        test_continuous_calendar().await?;
 
         // Rolllover flag
         // test_rollover_calendar().await?;
@@ -576,7 +579,8 @@ mod tests {
 
             // Test
             compare_dbn_raw_output(dbn_file.clone(), &PathBuf::from(mbinary_file.clone())).await?;
-            let equal = compare_dbn(dbn_file, &PathBuf::from(mbinary_file)).await?;
+            let equal = compare_dbn(dbn_file, &PathBuf::from(mbinary_file.clone())).await?;
+            chronological_check(&PathBuf::from(mbinary_file)).await?;
 
             assert!(equal);
         }
@@ -614,7 +618,8 @@ mod tests {
 
             // Test
             compare_dbn_raw_output(dbn_file.clone(), &PathBuf::from(mbinary_file.clone())).await?;
-            let equal = compare_dbn(dbn_file, &PathBuf::from(mbinary_file)).await?;
+            let equal = compare_dbn(dbn_file, &PathBuf::from(mbinary_file.clone())).await?;
+            chronological_check(&PathBuf::from(mbinary_file)).await?;
 
             assert!(equal);
         }
@@ -656,7 +661,8 @@ mod tests {
 
             // Test
             compare_dbn_raw_output(dbn_file.clone(), &PathBuf::from(mbinary_file.clone())).await?;
-            let equal = compare_dbn(dbn_file, &PathBuf::from(mbinary_file)).await?;
+            let equal = compare_dbn(dbn_file, &PathBuf::from(mbinary_file.clone())).await?;
+            chronological_check(&PathBuf::from(mbinary_file)).await?;
 
             assert!(equal);
         }
@@ -697,7 +703,8 @@ mod tests {
 
             // Test
             compare_dbn_raw_output(dbn_file.clone(), &PathBuf::from(mbinary_file.clone())).await?;
-            let equal = compare_dbn(dbn_file, &PathBuf::from(mbinary_file)).await?;
+            let equal = compare_dbn(dbn_file, &PathBuf::from(mbinary_file.clone())).await?;
+            chronological_check(&PathBuf::from(mbinary_file)).await?;
 
             assert!(equal);
         }
