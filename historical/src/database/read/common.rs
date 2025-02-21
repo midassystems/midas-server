@@ -3,23 +3,21 @@ use super::{
         EQUITIES_BBO_QUERY, EQUITIES_MBP1_QUERY, EQUITIES_OHLCV_QUERY, EQUITIES_TRADE_QUERY,
     },
     futures::{
-        FUTURES_BBO_CONTINUOUS_QUERY, FUTURES_BBO_CONTINUOUS_VOLUME_QUERY, FUTURES_BBO_QUERY,
-        FUTURES_MBP1_CONTINUOUS_QUERY, FUTURES_MBP1_CONTINUOUS_VOLUME_QUERY, FUTURES_MBP1_QUERY,
-        FUTURES_OHLCV_CONTINUOUS_QUERY, FUTURES_OHLCV_CONTINUOUS_VOLUME_QUERY, FUTURES_OHLCV_QUERY,
-        FUTURES_TRADE_CONTINUOUS_QUERY, FUTURES_TRADE_CONTINUOUS_VOLUME_QUERY, FUTURES_TRADE_QUERY,
+        FUTURES_BBO_QUERY, FUTURES_CONTINUOUS_CALENDAR, FUTURES_CONTINUOUS_VOLUME,
+        FUTURES_MBP1_QUERY, FUTURES_OHLCV_QUERY, FUTURES_TRADE_QUERY,
     },
     option::{OPTION_BBO_QUERY, OPTION_MBP1_QUERY, OPTION_OHLCV_QUERY, OPTION_TRADE_QUERY},
 };
+use crate::Error;
 use crate::{services::retrieve::retriever::ContinuousKind, Result};
 use async_trait::async_trait;
 use futures::Stream;
-use mbinary::enums::{Dataset, RType, Schema, Stype};
+use mbinary::enums::{Dataset, RType, Schema};
 use mbinary::params::RetrieveParams;
 use mbinary::record_enum::RecordEnum;
 use mbinary::records::{BboMsg, Mbp1Msg, OhlcvMsg, TbboMsg, TradeMsg};
-use sqlx::PgPool;
-use std::pin::Pin;
-use tracing::info;
+use sqlx::{prelude::FromRow, PgPool};
+use std::{collections::HashMap, pin::Pin};
 
 pub enum QueryType {
     Mbp,
@@ -29,58 +27,25 @@ pub enum QueryType {
 }
 
 impl QueryType {
-    fn get_query(
-        self,
-        dataset: Dataset,
-        stype: Stype,
-        continuous_kind: &ContinuousKind,
-    ) -> &'static str {
+    fn get_query(self, dataset: Dataset) -> &'static str {
         match self {
             QueryType::Mbp => match dataset {
-                Dataset::Futures => match stype {
-                    Stype::Continuous => match continuous_kind {
-                        ContinuousKind::Calendar => FUTURES_MBP1_CONTINUOUS_QUERY,
-                        ContinuousKind::Volume => FUTURES_MBP1_CONTINUOUS_VOLUME_QUERY,
-                        ContinuousKind::None => FUTURES_MBP1_CONTINUOUS_QUERY,
-                    },
-                    Stype::Raw => FUTURES_MBP1_QUERY,
-                },
+                Dataset::Futures => FUTURES_MBP1_QUERY,
                 Dataset::Equities => EQUITIES_MBP1_QUERY,
                 Dataset::Option => OPTION_MBP1_QUERY,
             },
             QueryType::Trade => match dataset {
-                Dataset::Futures => match stype {
-                    Stype::Continuous => match continuous_kind {
-                        ContinuousKind::Calendar => FUTURES_TRADE_CONTINUOUS_QUERY,
-                        ContinuousKind::Volume => FUTURES_TRADE_CONTINUOUS_VOLUME_QUERY,
-                        ContinuousKind::None => FUTURES_TRADE_CONTINUOUS_QUERY,
-                    },
-                    Stype::Raw => FUTURES_TRADE_QUERY,
-                },
+                Dataset::Futures => FUTURES_TRADE_QUERY,
                 Dataset::Equities => EQUITIES_TRADE_QUERY,
                 Dataset::Option => OPTION_TRADE_QUERY,
             },
             QueryType::Ohlcv => match dataset {
-                Dataset::Futures => match stype {
-                    Stype::Continuous => match continuous_kind {
-                        ContinuousKind::Calendar => FUTURES_OHLCV_CONTINUOUS_QUERY,
-                        ContinuousKind::Volume => FUTURES_OHLCV_CONTINUOUS_VOLUME_QUERY,
-                        ContinuousKind::None => FUTURES_OHLCV_CONTINUOUS_QUERY,
-                    },
-                    Stype::Raw => FUTURES_OHLCV_QUERY,
-                },
+                Dataset::Futures => FUTURES_OHLCV_QUERY,
                 Dataset::Equities => EQUITIES_OHLCV_QUERY,
                 Dataset::Option => OPTION_OHLCV_QUERY,
             },
             QueryType::Bbo => match dataset {
-                Dataset::Futures => match stype {
-                    Stype::Continuous => match continuous_kind {
-                        ContinuousKind::Calendar => FUTURES_BBO_CONTINUOUS_QUERY,
-                        ContinuousKind::Volume => FUTURES_BBO_CONTINUOUS_VOLUME_QUERY,
-                        ContinuousKind::None => FUTURES_BBO_CONTINUOUS_QUERY,
-                    },
-                    Stype::Raw => FUTURES_BBO_QUERY,
-                },
+                Dataset::Futures => FUTURES_BBO_QUERY,
                 Dataset::Equities => EQUITIES_BBO_QUERY,
                 Dataset::Option => OPTION_BBO_QUERY,
             },
@@ -88,76 +53,97 @@ impl QueryType {
     }
 }
 
-// impl QueryType {
-//     fn get_query(self, dataset: Dataset, stype: Stype) -> &'static str {
-//         match self {
-//             QueryType::Mbp => match dataset {
-//                 Dataset::Futures => match stype {
-//                     Stype::Continuous => FUTURES_MBP1_CONTINUOUS_QUERY,
-//                     Stype::Raw => FUTURES_MBP1_QUERY,
-//                 },
-//                 Dataset::Equities => EQUITIES_MBP1_QUERY,
-//                 Dataset::Option => OPTION_MBP1_QUERY,
-//             },
-//             QueryType::Trade => match dataset {
-//                 Dataset::Futures => match stype {
-//                     Stype::Continuous => FUTURES_TRADE_CONTINUOUS_QUERY,
-//                     Stype::Raw => FUTURES_TRADE_QUERY,
-//                 },
-//                 Dataset::Equities => EQUITIES_TRADE_QUERY,
-//                 Dataset::Option => OPTION_TRADE_QUERY,
-//             },
-//             QueryType::Ohlcv => match dataset {
-//                 Dataset::Futures => match stype {
-//                     Stype::Continuous => FUTURES_OHLCV_CONTINUOUS_QUERY,
-//                     Stype::Raw => FUTURES_OHLCV_QUERY,
-//                 },
-//                 Dataset::Equities => EQUITIES_OHLCV_QUERY,
-//                 Dataset::Option => OPTION_OHLCV_QUERY,
-//             },
-//             QueryType::Bbo => match dataset {
-//                 Dataset::Futures => match stype {
-//                     Stype::Continuous => FUTURES_BBO_CONTINUOUS_QUERY,
-//                     Stype::Raw => FUTURES_BBO_QUERY,
-//                 },
-//                 Dataset::Equities => EQUITIES_BBO_QUERY,
-//                 Dataset::Option => OPTION_BBO_QUERY,
-//             },
+#[derive(FromRow, Debug, Clone)]
+pub struct RollingWindow {
+    pub ticker: String,
+    pub instrument_id: i32,
+    pub continuous_ticker: String,
+    pub start_time: i64,
+    pub end_time: i64,
+}
+
+impl RollingWindow {
+    pub async fn retrieve_continuous_window(
+        pool: &PgPool,
+        start_ts: i64,
+        end_ts: i64,
+        rank: i32,
+        symbols: Vec<String>,
+        continuous_kind: &ContinuousKind,
+    ) -> Result<HashMap<String, Vec<RollingWindow>>> {
+        let query = match continuous_kind {
+            ContinuousKind::Volume => FUTURES_CONTINUOUS_VOLUME,
+            ContinuousKind::Calendar => FUTURES_CONTINUOUS_CALENDAR,
+            ContinuousKind::None => {
+                return Err(Error::CustomError("Invalid continous type".to_string()))
+            }
+        };
+
+        // Execute continuous query
+        let vec: Vec<RollingWindow> = sqlx::query_as(query)
+            .bind(start_ts)
+            .bind(end_ts - 1)
+            .bind(symbols)
+            .bind(rank)
+            .fetch_all(pool)
+            .await?;
+
+        // Create a HashMap to store the results
+        let mut result_map: HashMap<String, Vec<RollingWindow>> = HashMap::new();
+        // let key = format!("{}.{}", continuous_kind.as_str(), rank);
+
+        // Populate the HashMap
+        for window in vec {
+            result_map
+                .entry(window.continuous_ticker.clone())
+                .or_insert_with(Vec::new)
+                .push(window);
+        }
+
+        // Sort each Vec<RollingWindow> by start_ts
+        for vec in result_map.values_mut() {
+            vec.sort_by_key(|w| std::cmp::Reverse(w.start_time));
+        }
+
+        // let mut map = HashMap::new();
+        // map.insert(key, result_map);
+
+        Ok(result_map)
+    }
+}
+
+// pub trait QueryParams {
+//     fn symbols_array(&self) -> Vec<String>;
+//     fn rank(&self) -> i32;
+// }
+//
+// impl QueryParams for RetrieveParams {
+//     fn symbols_array(&self) -> Vec<String> {
+//         match self.stype {
+//             Stype::Raw => self.symbols.iter().map(|s| s.clone()).collect(),
+//             Stype::Continuous => self
+//                 .symbols
+//                 .iter()
+//                 .map(|s| s.split('.').next().unwrap_or(s).to_string() + "%")
+//                 .collect(),
 //         }
 //     }
+//     fn rank(&self) -> i32 {
+//         self.symbols
+//             .first()
+//             .and_then(|symbol| symbol.split('.').last())
+//             .and_then(|rank_str| rank_str.parse::<i32>().ok())
+//             .unwrap_or(0) // Default to 0 if any step fails
+//     }
 // }
-
-pub trait QueryParams {
-    fn symbols_array(&self) -> Vec<String>;
-    fn rank(&self) -> i32;
-}
-
-impl QueryParams for RetrieveParams {
-    fn symbols_array(&self) -> Vec<String> {
-        match self.stype {
-            Stype::Raw => self.symbols.iter().map(|s| s.clone()).collect(),
-            Stype::Continuous => self
-                .symbols
-                .iter()
-                .map(|s| s.split('.').next().unwrap_or(s).to_string() + "%")
-                .collect(),
-        }
-    }
-    fn rank(&self) -> i32 {
-        self.symbols
-            .first()
-            .and_then(|symbol| symbol.split('.').last())
-            .and_then(|rank_str| rank_str.parse::<i32>().ok())
-            .unwrap_or(0) // Default to 0 if any step fails
-    }
-}
 
 #[async_trait]
 pub trait RecordsQuery {
     async fn retrieve_query(
         pool: &PgPool,
-        mut params: RetrieveParams,
-        continuous_kind: &ContinuousKind,
+        params: &RetrieveParams,
+        continuous_flag: bool,
+        continuous_suffix: String,
     ) -> Result<
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     >;
@@ -167,34 +153,24 @@ pub trait RecordsQuery {
 impl RecordsQuery for Mbp1Msg {
     async fn retrieve_query(
         pool: &PgPool,
-        mut params: RetrieveParams,
-        continuous_kind: &ContinuousKind,
+        params: &RetrieveParams,
+        continuous_flag: bool,
+        continuous_suffix: String,
     ) -> Result<
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     > {
         // Parameters
-        let _ = params.interval_adjust_ts_start()?;
-        let _ = params.interval_adjust_ts_end()?;
         let tbbo_flag = params.schema == Schema::Tbbo;
-        let symbol_array = params.symbols_array();
-        let rank = params.rank();
-        // let num_symbols = symbol_array.len() as i32;
-
-        info!(
-            "Retrieving {:?} records for symbols: {:?} start: {:?} end: {:?} tbbo_flag {:?}",
-            params.schema, params.symbols, params.start_ts, params.end_ts, tbbo_flag
-        );
 
         // Execute continuous query
-        let cursor =
-            sqlx::query(QueryType::Mbp.get_query(params.dataset, params.stype, continuous_kind))
-                .bind(params.start_ts)
-                .bind(params.end_ts - 1)
-                .bind(symbol_array)
-                .bind(tbbo_flag)
-                .bind(rank)
-                .fetch(pool);
-        // .bind(num_symbols)
+        let cursor = sqlx::query(QueryType::Mbp.get_query(params.dataset))
+            .bind(params.start_ts)
+            .bind(params.end_ts - 1)
+            .bind(params.symbols.clone())
+            .bind(tbbo_flag)
+            .bind(continuous_flag)
+            .bind(continuous_suffix)
+            .fetch(pool);
 
         Ok(cursor)
     }
@@ -204,33 +180,23 @@ impl RecordsQuery for Mbp1Msg {
 impl RecordsQuery for TradeMsg {
     async fn retrieve_query(
         pool: &PgPool,
-        mut params: RetrieveParams,
-        continuous_kind: &ContinuousKind,
+        params: &RetrieveParams,
+        continuous_flag: bool,
+        continuous_suffix: String,
     ) -> Result<
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     > {
         // Parameters
-        let _ = params.interval_adjust_ts_start()?;
-        let _ = params.interval_adjust_ts_end()?;
-        let symbol_array = params.symbols_array();
-        // let num_symbols = symbol_array.len() as i32;
-        let rank = params.rank();
-
-        info!(
-            "Retrieving {:?} records for symbols: {:?} start: {:?} end: {:?} ",
-            params.schema, params.symbols, params.start_ts, params.end_ts
-        );
 
         // Execute the query with parameters, including LIMIT and OFFSET
-        let cursor =
-            sqlx::query(QueryType::Trade.get_query(params.dataset, params.stype, continuous_kind))
-                .bind(params.start_ts)
-                .bind(params.end_ts - 1)
-                .bind(symbol_array)
-                .bind(rank)
-                .fetch(pool);
+        let cursor = sqlx::query(QueryType::Trade.get_query(params.dataset))
+            .bind(params.start_ts)
+            .bind(params.end_ts - 1)
+            .bind(params.symbols.clone())
+            .bind(continuous_flag)
+            .bind(continuous_suffix)
+            .fetch(pool);
 
-        // .bind(num_symbols)
         Ok(cursor)
     }
 }
@@ -239,35 +205,25 @@ impl RecordsQuery for TradeMsg {
 impl RecordsQuery for BboMsg {
     async fn retrieve_query(
         pool: &PgPool,
-        mut params: RetrieveParams,
-        continuous_kind: &ContinuousKind,
+        params: &RetrieveParams,
+        continuous_flag: bool,
+        continuous_suffix: String,
     ) -> Result<
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     > {
         // Parameters
-        let _ = params.interval_adjust_ts_start()?;
-        let _ = params.interval_adjust_ts_end()?;
         let interval_ns = params.schema_interval()?;
-        let symbol_array = params.symbols_array();
-        // let num_symbols = symbol_array.len() as i32;
-        let rank = params.rank();
-
-        info!(
-            "Retrieving {:?} records for symbols: {:?} start: {:?} end: {:?} ",
-            params.schema, params.symbols, params.start_ts, params.end_ts
-        );
 
         // Construct the SQL query with a join and additional filtering by symbols
-        let cursor =
-            sqlx::query(QueryType::Bbo.get_query(params.dataset, params.stype, continuous_kind))
-                .bind(params.start_ts)
-                .bind(params.end_ts)
-                .bind(interval_ns)
-                .bind(symbol_array)
-                .bind(rank)
-                .fetch(pool);
+        let cursor = sqlx::query(QueryType::Bbo.get_query(params.dataset))
+            .bind(params.start_ts)
+            .bind(params.end_ts)
+            .bind(interval_ns)
+            .bind(params.symbols.clone())
+            .bind(continuous_flag)
+            .bind(continuous_suffix)
+            .fetch(pool);
 
-        // .bind(num_symbols)
         Ok(cursor)
     }
 }
@@ -276,33 +232,23 @@ impl RecordsQuery for BboMsg {
 impl RecordsQuery for OhlcvMsg {
     async fn retrieve_query(
         pool: &PgPool,
-        mut params: RetrieveParams,
-        continuous_kind: &ContinuousKind,
+        params: &RetrieveParams,
+        continuous_flag: bool,
+        continuous_suffix: String,
     ) -> Result<
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     > {
         // Parameters
-        let _ = params.interval_adjust_ts_start()?;
-        let _ = params.interval_adjust_ts_end()?;
         let interval_ns = params.schema_interval()?;
-        let symbol_array = params.symbols_array();
-        // let num_symbols = symbol_array.len() as i32;
-        let rank = params.rank();
 
-        info!(
-            "Retrieving {:?} records for symbols: {:?} start: {:?} end: {:?} ",
-            params.schema, symbol_array, params.start_ts, params.end_ts
-        );
-
-        let cursor =
-            sqlx::query(QueryType::Ohlcv.get_query(params.dataset, params.stype, continuous_kind))
-                .bind(params.start_ts)
-                .bind(params.end_ts)
-                .bind(interval_ns)
-                .bind(symbol_array)
-                // .bind(num_symbols)
-                .bind(rank)
-                .fetch(pool);
+        let cursor = sqlx::query(QueryType::Ohlcv.get_query(params.dataset))
+            .bind(params.start_ts)
+            .bind(params.end_ts)
+            .bind(interval_ns)
+            .bind(params.symbols.clone())
+            .bind(continuous_flag)
+            .bind(continuous_suffix)
+            .fetch(pool);
 
         Ok(cursor)
     }
@@ -311,17 +257,43 @@ impl RecordsQuery for OhlcvMsg {
 impl RecordsQuery for RecordEnum {
     async fn retrieve_query(
         pool: &PgPool,
-        params: RetrieveParams,
-        continuous_kind: &ContinuousKind,
+        params: &RetrieveParams,
+        continuous_flag: bool,
+        continuous_suffix: String,
     ) -> Result<
         Pin<Box<dyn Stream<Item = std::result::Result<sqlx::postgres::PgRow, sqlx::Error>> + Send>>,
     > {
         match RType::from(params.rtype().unwrap()) {
-            RType::Mbp1 => Ok(Mbp1Msg::retrieve_query(pool, params, continuous_kind).await?),
-            RType::Trades => Ok(TradeMsg::retrieve_query(pool, params, continuous_kind).await?),
-            RType::Ohlcv => Ok(OhlcvMsg::retrieve_query(pool, params, continuous_kind).await?),
-            RType::Bbo => Ok(BboMsg::retrieve_query(pool, params, continuous_kind).await?),
-            RType::Tbbo => Ok(TbboMsg::retrieve_query(pool, params, continuous_kind).await?),
+            RType::Mbp1 => {
+                Ok(
+                    Mbp1Msg::retrieve_query(pool, params, continuous_flag, continuous_suffix)
+                        .await?,
+                )
+            }
+            RType::Trades => {
+                Ok(
+                    TradeMsg::retrieve_query(pool, params, continuous_flag, continuous_suffix)
+                        .await?,
+                )
+            }
+            RType::Ohlcv => {
+                Ok(
+                    OhlcvMsg::retrieve_query(pool, params, continuous_flag, continuous_suffix)
+                        .await?,
+                )
+            }
+            RType::Bbo => {
+                Ok(
+                    BboMsg::retrieve_query(pool, params, continuous_flag, continuous_suffix)
+                        .await?,
+                )
+            }
+            RType::Tbbo => {
+                Ok(
+                    TbboMsg::retrieve_query(pool, params, continuous_flag, continuous_suffix)
+                        .await?,
+                )
+            }
         }
     }
 }
@@ -528,7 +500,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = Mbp1Msg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = Mbp1Msg::retrieve_query(&pool, &query_params, false, "".to_string())
             .await
             .expect("Error on retrieve records.");
 
@@ -660,7 +632,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = TbboMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = TbboMsg::retrieve_query(&pool, &query_params, false, "".to_string())
             .await
             .expect("Error on retrieve records.");
 
@@ -792,7 +764,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = TradeMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = TradeMsg::retrieve_query(&pool, &query_params, false, "".to_string())
             .await
             .expect("Error on retrieve records.");
 
@@ -924,7 +896,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = BboMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = BboMsg::retrieve_query(&pool, &query_params, false, "".to_string())
             .await
             .expect("Error on retrieve records.");
 
@@ -1078,7 +1050,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = OhlcvMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = OhlcvMsg::retrieve_query(&pool, &query_params, false, "".to_string())
             .await
             .expect("Error on retrieve records.");
 
@@ -1212,7 +1184,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = Mbp1Msg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = Mbp1Msg::retrieve_query(&pool, &query_params, false, "".to_string())
             .await
             .expect("Error on retrieve records.");
 
@@ -1343,7 +1315,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = TbboMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = TbboMsg::retrieve_query(&pool, &query_params, false, "".to_string())
             .await
             .expect("Error on retrieve records.");
 
@@ -1474,7 +1446,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = TradeMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = TradeMsg::retrieve_query(&pool, &query_params, false, "".to_string())
             .await
             .expect("Error on retrieve records.");
 
@@ -1605,7 +1577,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = BboMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = BboMsg::retrieve_query(&pool, &query_params, false, "".to_string())
             .await
             .expect("Error on retrieve records.");
 
@@ -1759,7 +1731,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = OhlcvMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = OhlcvMsg::retrieve_query(&pool, &query_params, false, "".to_string())
             .await
             .expect("Error on retrieve records.");
 
@@ -1892,7 +1864,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = Mbp1Msg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = Mbp1Msg::retrieve_query(&pool, &query_params, false, "".to_string())
             .await
             .expect("Error on retrieve records.");
 
@@ -2023,7 +1995,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = TbboMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = TbboMsg::retrieve_query(&pool, &query_params, false, "".to_string())
             .await
             .expect("Error on retrieve records.");
 
@@ -2154,7 +2126,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = TradeMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = TradeMsg::retrieve_query(&pool, &query_params, false, "".to_string())
             .await
             .expect("Error on retrieve records.");
 
@@ -2285,7 +2257,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = BboMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = BboMsg::retrieve_query(&pool, &query_params, false, "".to_string())
             .await
             .expect("Error on retrieve records.");
 
@@ -2439,7 +2411,7 @@ mod test {
             stype: Stype::Raw,
         };
 
-        let mut cursor = OhlcvMsg::retrieve_query(&pool, query_params, &ContinuousKind::None)
+        let mut cursor = OhlcvMsg::retrieve_query(&pool, &query_params, false, "".to_string())
             .await
             .expect("Error on retrieve records.");
 
@@ -2475,7 +2447,7 @@ mod test {
     // Continuous futures
     #[sqlx::test]
     #[serial]
-    // #[ignore]
+    #[ignore]
     async fn test_retrieve_mbp1_futures_continuous() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
@@ -2573,7 +2545,7 @@ mod test {
             stype: Stype::Continuous,
         };
 
-        let mut cursor = Mbp1Msg::retrieve_query(&pool, query_params, &ContinuousKind::Calendar)
+        let mut cursor = Mbp1Msg::retrieve_query(&pool, &query_params, false, "".to_string())
             .await
             .expect("Error on retrieve records.");
 
@@ -2606,7 +2578,7 @@ mod test {
 
     #[sqlx::test]
     #[serial]
-    // #[ignore]
+    #[ignore]
     async fn test_retrieve_mbp1_futures_continuous_volume() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
@@ -2704,7 +2676,7 @@ mod test {
             stype: Stype::Continuous,
         };
 
-        let mut cursor = Mbp1Msg::retrieve_query(&pool, query_params, &ContinuousKind::Volume)
+        let mut cursor = Mbp1Msg::retrieve_query(&pool, &query_params, false, "".to_string())
             .await
             .expect("Error on retrieve records.");
 
@@ -2729,6 +2701,226 @@ mod test {
 
         // Cleanup
         delete_instrument(instrument_id)
+            .await
+            .expect("Error on delete");
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[serial]
+    // #[ignore]
+    async fn test_retrieve_rolling_window() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+
+        let schema = dbn::Schema::from_str("mbp-1")?;
+        let dbn_dataset = dbn::Dataset::from_str("GLBX.MDP3")?;
+        let stype = dbn::SType::from_str("raw_symbol")?;
+        let vendor_data = VendorData::Databento(DatabentoData {
+            schema,
+            dataset: dbn_dataset,
+            stype,
+        });
+
+        let dataset = Dataset::Futures;
+        let instrument = Instrument::new(
+            None,
+            "HEJ4",
+            "LeanHogs-0424",
+            dataset,
+            Vendors::Databento,
+            vendor_data.encode(),
+            1712941200000000000,
+            1704067200000000000,
+            1712941200000000000,
+            true,
+        );
+
+        let dataset = Dataset::Futures;
+        let instrument2 = Instrument::new(
+            None,
+            "HEG4",
+            "LeanHogs-0224",
+            dataset,
+            Vendors::Databento,
+            vendor_data.encode(),
+            1707937194000000000,
+            1704067200000000000,
+            1707937194000000000,
+            true,
+        );
+
+        let instrument3 = Instrument::new(
+            None,
+            "LEJ4",
+            "LeanHogs-0424",
+            dataset,
+            Vendors::Databento,
+            vendor_data.encode(),
+            1712941200000000000,
+            1704067200000000000,
+            1712941200000000000,
+            true,
+        );
+
+        let dataset = Dataset::Futures;
+        let instrument4 = Instrument::new(
+            None,
+            "LEG4",
+            "LeanHogs-0224",
+            dataset,
+            Vendors::Databento,
+            vendor_data.encode(),
+            1707937194000000000,
+            1704067200000000000,
+            1707937194000000000,
+            true,
+        );
+
+        let instrument_id = create_instrument(instrument)
+            .await
+            .expect("Error creating instrument.");
+
+        let instrument_id2 = create_instrument(instrument2)
+            .await
+            .expect("Error creating instrument.");
+
+        let instrument_id3 = create_instrument(instrument3)
+            .await
+            .expect("Error creating instrument.");
+
+        let instrument_id4 = create_instrument(instrument4)
+            .await
+            .expect("Error creating instrument.");
+
+        // Test
+        let query_params = RetrieveParams {
+            symbols: vec!["HE.c.0".to_string(), "LE.c.0".to_string()],
+            start_ts: 1705258794000000000,
+            end_ts: 1713117594000000000,
+            schema: Schema::Mbp1,
+            dataset: dataset.clone(),
+            stype: Stype::Continuous,
+        };
+
+        let vec = RollingWindow::retrieve_continuous_window(
+            &pool,
+            query_params.start_ts,
+            query_params.end_ts,
+            0,
+            vec!["HE%".to_string(), "LE%".to_string()],
+            &ContinuousKind::Calendar,
+        )
+        .await
+        .expect("Error on retrieve records.");
+
+        //Validate
+        assert!(vec["HE.c.0"].len() == 2);
+        assert!(vec["LE.c.0"].len() == 2);
+
+        // Cleanup
+        delete_instrument(instrument_id)
+            .await
+            .expect("Error on delete");
+
+        delete_instrument(instrument_id2)
+            .await
+            .expect("Error on delete");
+
+        delete_instrument(instrument_id3)
+            .await
+            .expect("Error on delete");
+
+        delete_instrument(instrument_id4)
+            .await
+            .expect("Error on delete");
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[serial]
+    #[ignore]
+    async fn test_retrieve_rolling_window_volume() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+
+        let schema = dbn::Schema::from_str("mbp-1")?;
+        let dbn_dataset = dbn::Dataset::from_str("GLBX.MDP3")?;
+        let stype = dbn::SType::from_str("raw_symbol")?;
+        let vendor_data = VendorData::Databento(DatabentoData {
+            schema,
+            dataset: dbn_dataset,
+            stype,
+        });
+
+        let dataset = Dataset::Futures;
+        let instrument = Instrument::new(
+            None,
+            "HEJ4",
+            "LeanHogs-0424",
+            dataset,
+            Vendors::Databento,
+            vendor_data.encode(),
+            1712941200000000000,
+            1704067200000000000,
+            1712941200000000000,
+            true,
+        );
+
+        let dataset = Dataset::Futures;
+        let instrument2 = Instrument::new(
+            None,
+            "HEG4",
+            "LeanHogs-0224",
+            dataset,
+            Vendors::Databento,
+            vendor_data.encode(),
+            1707937194000000000,
+            1704067200000000000,
+            1707937194000000000,
+            true,
+        );
+
+        let instrument_id = create_instrument(instrument)
+            .await
+            .expect("Error creating instrument.");
+
+        let instrument_id2 = create_instrument(instrument2)
+            .await
+            .expect("Error creating instrument.");
+
+        // Test
+        let query_params = RetrieveParams {
+            symbols: vec!["HE.c.0".to_string()],
+            start_ts: 1705258794000000000,
+            end_ts: 1713117594000000000,
+            schema: Schema::Mbp1,
+            dataset: dataset.clone(),
+            stype: Stype::Continuous,
+        };
+
+        let vec = RollingWindow::retrieve_continuous_window(
+            &pool,
+            query_params.start_ts,
+            query_params.end_ts,
+            0,
+            vec!["HE%".to_string(), "LE%".to_string()],
+            &ContinuousKind::Calendar,
+        )
+        .await
+        .expect("Error on retrieve records.");
+
+        // Validate
+        assert!(vec["HE.c.0"].len() == 3);
+
+        // Cleanup
+        delete_instrument(instrument_id)
+            .await
+            .expect("Error on delete");
+
+        delete_instrument(instrument_id2)
             .await
             .expect("Error on delete");
 

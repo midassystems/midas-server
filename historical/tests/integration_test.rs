@@ -13,6 +13,7 @@ use mbinary::params::RetrieveParams;
 use mbinary::symbols::SymbolMap;
 use mbinary::vendors::Vendors;
 use mbinary::vendors::{DatabentoData, VendorData};
+use mbinary::{self};
 use mbinary::{
     enums::{Dataset, Schema, Stype},
     symbols::Instrument,
