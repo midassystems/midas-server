@@ -63,10 +63,20 @@ pub struct RollingWindow {
 }
 
 impl RollingWindow {
+    pub async fn adjust_end_ts(start_ts: i64, end_ts: &mut i64) -> Result<()> {
+        let interval_ns = 86_400_000_000_000;
+        let start_day_end = start_ts + (interval_ns - (start_ts % interval_ns));
+
+        if *end_ts > start_day_end {
+            *end_ts = start_day_end;
+        }
+        Ok(())
+    }
+
     pub async fn retrieve_continuous_window(
         pool: &PgPool,
-        start_ts: i64,
-        end_ts: i64,
+        mut start_ts: i64,
+        mut end_ts: i64,
         rank: i32,
         symbols: Vec<String>,
         continuous_kind: &ContinuousKind,
@@ -78,25 +88,60 @@ impl RollingWindow {
                 return Err(Error::CustomError("Invalid continous type".to_string()))
             }
         };
+        let final_ts = end_ts;
+        RollingWindow::adjust_end_ts(start_ts, &mut end_ts).await?;
 
+        // Create a HashMap to store the results
+        let mut raw_map: HashMap<String, HashMap<String, RollingWindow>> = HashMap::new();
+
+        while end_ts < final_ts {
+            // Execute continuous query
+            let objs: Vec<RollingWindow> = sqlx::query_as(query)
+                .bind(start_ts)
+                .bind(end_ts - 1)
+                .bind(&symbols)
+                .bind(rank)
+                .fetch_all(pool)
+                .await?;
+
+            // Upated raw_symbols, adds symbo if new elseupdate end_ts
+            for obj in objs {
+                let ticker_map = raw_map
+                    .entry(obj.continuous_ticker.clone())
+                    .or_insert_with(HashMap::new);
+                let entry = ticker_map.entry(obj.ticker.clone()).or_insert(obj.clone());
+
+                // Update end_time if new window extends further
+                entry.end_time = entry.end_time.max(obj.end_time);
+            }
+
+            start_ts = end_ts;
+            end_ts = (end_ts + 86_400_000_000_000).min(final_ts);
+        }
         // Execute continuous query
-        let vec: Vec<RollingWindow> = sqlx::query_as(query)
+        let objs: Vec<RollingWindow> = sqlx::query_as(query)
             .bind(start_ts)
             .bind(end_ts - 1)
-            .bind(symbols)
+            .bind(&symbols)
             .bind(rank)
             .fetch_all(pool)
             .await?;
 
-        // Create a HashMap to store the results
-        let mut result_map: HashMap<String, Vec<RollingWindow>> = HashMap::new();
+        // Upated raw_symbols, adds symbo if new elseupdate end_ts
+        for obj in objs {
+            let ticker_map = raw_map
+                .entry(obj.continuous_ticker.clone())
+                .or_insert_with(HashMap::new);
+            let entry = ticker_map.entry(obj.ticker.clone()).or_insert(obj.clone());
 
-        // Populate the HashMap
-        for window in vec {
-            result_map
-                .entry(window.continuous_ticker.clone())
-                .or_insert_with(Vec::new)
-                .push(window);
+            // Update end_time if new window extends further
+            entry.end_time = entry.end_time.max(obj.end_time);
+        }
+
+        // Final result: Collapse inner HashMaps into Vec<RollingWindow>
+        let mut result_map: HashMap<String, Vec<RollingWindow>> = HashMap::new();
+        for (continuous_ticker, inner_map) in raw_map {
+            result_map.insert(continuous_ticker, inner_map.into_values().collect());
         }
 
         // Sort each Vec<RollingWindow> by start_ts
