@@ -28,6 +28,7 @@ pub struct QueryTask {
     heap: Arc<Mutex<MinHeap<Records>>>,
     pool: PgPool,
     pub queried_flag: Arc<Mutex<bool>>,
+    rollover_map: HashMap<String, u8>,
 }
 
 impl QueryTask {
@@ -62,11 +63,23 @@ impl QueryTask {
             heap,
             pool,
             queried_flag,
+            rollover_map: HashMap::new(),
         };
 
         task.initialize(rank, kind).await?;
+        task.adjust_params_end().await?;
 
         Ok(task)
+    }
+    pub async fn adjust_params_end(&mut self) -> Result<()> {
+        let interval_ns = 86_400_000_000_000;
+        let start_day_end =
+            self.params.start_ts + (interval_ns - (self.params.start_ts % interval_ns));
+
+        if self.params.end_ts > start_day_end {
+            self.params.end_ts = start_day_end;
+        }
+        Ok(())
     }
     pub async fn initialize(&mut self, rank: i32, kind: ContinuousKind) -> Result<()> {
         match self.params.stype {
@@ -128,7 +141,7 @@ impl QueryTask {
                 Ok(row) => match self.stype {
                     Stype::Raw => {
                         let record = Records {
-                            record: from_row_fn(&row, None)?,
+                            record: from_row_fn(&row, None, None)?,
                         };
 
                         {
@@ -139,10 +152,15 @@ impl QueryTask {
                     Stype::Continuous => {
                         let ticker: String = row.try_get("ticker")?;
                         let new_id = self.id_map.get(&ticker).copied();
+                        let rollover = self.rollover_map.get(&ticker).copied();
 
                         let record = Records {
-                            record: from_row_fn(&row, new_id)?,
+                            record: from_row_fn(&row, new_id, rollover)?,
                         };
+
+                        if let Some(_r) = rollover {
+                            self.rollover_map.remove(&ticker);
+                        }
 
                         {
                             let mut heap = self.heap.lock().await;
@@ -163,10 +181,11 @@ impl QueryTask {
     }
 
     pub async fn process_records_raw(&mut self) -> Result<()> {
-        while (self.final_end - self.params.start_ts) > 86_400_000_000_001 {
-            self.params.end_ts = self.params.start_ts + 86_400_000_000_000;
+        while self.params.end_ts < self.final_end {
+            // self.params.end_ts = self.params.start_ts + 86_400_000_000_000;
             self.get_records(false).await?;
             self.params.start_ts = self.params.end_ts;
+            self.params.end_ts += 86_400_000_000_000;
         }
 
         self.params.end_ts = self.final_end;
@@ -175,6 +194,19 @@ impl QueryTask {
         Ok(())
     }
 
+    // pub async fn process_records_raw(&mut self) -> Result<()> {
+    //     while (self.final_end - self.params.start_ts) > 86_400_000_000_001 {
+    //         self.params.end_ts = self.params.start_ts + 86_400_000_000_000;
+    //         self.get_records(false).await?;
+    //         self.params.start_ts = self.params.end_ts;
+    //     }
+    //
+    //     self.params.end_ts = self.final_end;
+    //     self.get_records(false).await?;
+    //
+    //     Ok(())
+    // }
+
     fn update_tickers(&mut self, current_tickers: &mut HashMap<String, RollingWindow>) {
         let mut to_remove = Vec::new();
 
@@ -182,6 +214,7 @@ impl QueryTask {
             if obj.end_time < self.params.start_ts {
                 if let Some(new_value) = self.continuous_map.get_mut(ticker).and_then(|v| v.pop()) {
                     *obj = new_value;
+                    self.rollover_map.insert(ticker.clone(), 1);
                 } else {
                     to_remove.push(ticker.clone());
                 }
@@ -209,14 +242,13 @@ impl QueryTask {
         }
 
         // Wait for all tasks to finish
-        while (self.final_end - self.params.start_ts) > 86_400_000_000_001 {
-            self.params.end_ts = self.params.start_ts + 86_400_000_000_000;
-
+        while self.params.end_ts < self.final_end {
             self.update_tickers(&mut current_tickers);
 
             self.get_records(true).await?;
 
             self.params.start_ts = self.params.end_ts;
+            self.params.end_ts += 86_400_000_000_000;
         }
         self.update_tickers(&mut current_tickers);
 
@@ -225,6 +257,32 @@ impl QueryTask {
 
         Ok(())
     }
+
+    // pub async fn process_records_continuous(&mut self) -> Result<()> {
+    //     let mut current_tickers = HashMap::new();
+    //     for (ticker, obj) in &mut self.continuous_map {
+    //         if let Some(value) = obj.pop() {
+    //             current_tickers.insert(ticker.clone(), value);
+    //         }
+    //     }
+    //
+    //     // Wait for all tasks to finish
+    //     while (self.final_end - self.params.start_ts) > 86_400_000_000_001 {
+    //         self.params.end_ts = self.params.start_ts + 86_400_000_000_000;
+    //
+    //         self.update_tickers(&mut current_tickers);
+    //
+    //         self.get_records(true).await?;
+    //
+    //         self.params.start_ts = self.params.end_ts;
+    //     }
+    //     self.update_tickers(&mut current_tickers);
+    //
+    //     self.params.end_ts = self.final_end;
+    //     self.get_records(true).await?;
+    //
+    //     Ok(())
+    // }
 
     pub async fn process_records(&mut self) -> Result<()> {
         match self.stype {

@@ -90,7 +90,6 @@ impl RollingWindow {
 
         // Create a HashMap to store the results
         let mut result_map: HashMap<String, Vec<RollingWindow>> = HashMap::new();
-        // let key = format!("{}.{}", continuous_kind.as_str(), rank);
 
         // Populate the HashMap
         for window in vec {
@@ -105,37 +104,9 @@ impl RollingWindow {
             vec.sort_by_key(|w| std::cmp::Reverse(w.start_time));
         }
 
-        // let mut map = HashMap::new();
-        // map.insert(key, result_map);
-
         Ok(result_map)
     }
 }
-
-// pub trait QueryParams {
-//     fn symbols_array(&self) -> Vec<String>;
-//     fn rank(&self) -> i32;
-// }
-//
-// impl QueryParams for RetrieveParams {
-//     fn symbols_array(&self) -> Vec<String> {
-//         match self.stype {
-//             Stype::Raw => self.symbols.iter().map(|s| s.clone()).collect(),
-//             Stype::Continuous => self
-//                 .symbols
-//                 .iter()
-//                 .map(|s| s.split('.').next().unwrap_or(s).to_string() + "%")
-//                 .collect(),
-//         }
-//     }
-//     fn rank(&self) -> i32 {
-//         self.symbols
-//             .first()
-//             .and_then(|symbol| symbol.split('.').last())
-//             .and_then(|rank_str| rank_str.parse::<i32>().ok())
-//             .unwrap_or(0) // Default to 0 if any step fails
-//     }
-// }
 
 #[async_trait]
 pub trait RecordsQuery {
@@ -509,7 +480,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = Mbp1Msg::from_row(&row, None)?;
+                    let record = Mbp1Msg::from_row(&row, None, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Mbp1(record);
@@ -641,7 +612,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = TbboMsg::from_row(&row, None)?;
+                    let record = TbboMsg::from_row(&row, None, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Tbbo(record);
@@ -773,7 +744,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = TradeMsg::from_row(&row, None)?;
+                    let record = TradeMsg::from_row(&row, None, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Trade(record);
@@ -905,7 +876,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = BboMsg::from_row(&row, None)?;
+                    let record = BboMsg::from_row(&row, None, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Bbo(record);
@@ -1059,7 +1030,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = OhlcvMsg::from_row(&row, None)?;
+                    let record = OhlcvMsg::from_row(&row, None, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Ohlcv(record);
@@ -1193,7 +1164,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = Mbp1Msg::from_row(&row, None)?;
+                    let record = Mbp1Msg::from_row(&row, None, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Mbp1(record);
@@ -1324,7 +1295,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = TbboMsg::from_row(&row, None)?;
+                    let record = TbboMsg::from_row(&row, None, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Tbbo(record);
@@ -1455,7 +1426,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = TradeMsg::from_row(&row, None)?;
+                    let record = TradeMsg::from_row(&row, None, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Trade(record);
@@ -1586,7 +1557,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = BboMsg::from_row(&row, None)?;
+                    let record = BboMsg::from_row(&row, None, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Bbo(record);
@@ -1740,7 +1711,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = OhlcvMsg::from_row(&row, None)?;
+                    let record = OhlcvMsg::from_row(&row, None, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Ohlcv(record);
@@ -1873,7 +1844,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = Mbp1Msg::from_row(&row, None)?;
+                    let record = Mbp1Msg::from_row(&row, None, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Mbp1(record);
@@ -2004,7 +1975,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = TbboMsg::from_row(&row, None)?;
+                    let record = TbboMsg::from_row(&row, None, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Tbbo(record);
@@ -2135,7 +2106,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = TradeMsg::from_row(&row, None)?;
+                    let record = TradeMsg::from_row(&row, None, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Trade(record);
@@ -2266,7 +2237,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = BboMsg::from_row(&row, None)?;
+                    let record = BboMsg::from_row(&row, None, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Bbo(record);
@@ -2420,7 +2391,7 @@ mod test {
         while let Some(row_result) = cursor.next().await {
             match row_result {
                 Ok(row) => {
-                    let record = OhlcvMsg::from_row(&row, None)?;
+                    let record = OhlcvMsg::from_row(&row, None, None)?;
 
                     // Convert to RecordEnum and add to encoder
                     let record_enum = RecordEnum::Ohlcv(record);
@@ -2435,269 +2406,6 @@ mod test {
 
         // Validate
         assert!(query.len() > 0);
-
-        // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
-
-        Ok(())
-    }
-
-    // Continuous futures
-    #[sqlx::test]
-    #[serial]
-    #[ignore]
-    async fn test_retrieve_mbp1_futures_continuous() -> anyhow::Result<()> {
-        dotenv::dotenv().ok();
-        let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("GLBX.MDP3")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Futures;
-        let instrument = Instrument::new(
-            None,
-            "HEJ4",
-            "LeanHogs-0424",
-            dataset,
-            Vendors::Databento,
-            vendor_data.encode(),
-            1712941200000000000,
-            1704067200000000000,
-            1712941200000000000,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Mock data
-        let records = vec![
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
-                price: 6770,
-                size: 1,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
-                price: 6870,
-                size: 2,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092565,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-        ];
-
-        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
-            .await
-            .expect("Error inserting records.");
-        let _ = transaction.commit().await;
-
-        // Test
-        let query_params = RetrieveParams {
-            symbols: vec!["HE.c.0".to_string()],
-            start_ts: 1704209103644092563,
-            end_ts: 1704209903644092567,
-            schema: Schema::Mbp1,
-            dataset: dataset.clone(),
-            stype: Stype::Continuous,
-        };
-
-        let mut cursor = Mbp1Msg::retrieve_query(&pool, &query_params, false, "".to_string())
-            .await
-            .expect("Error on retrieve records.");
-
-        // Validate
-        let mut query: Vec<RecordEnum> = vec![];
-        while let Some(row_result) = cursor.next().await {
-            match row_result {
-                Ok(row) => {
-                    let record = Mbp1Msg::from_row(&row, None)?;
-
-                    // Convert to RecordEnum and add to encoder
-                    let record_enum = RecordEnum::Mbp1(record);
-                    query.push(record_enum);
-                }
-                Err(e) => {
-                    error!("Error processing row: {:?}", e);
-                    return Err(e.into());
-                }
-            }
-        }
-        assert_eq!(records.len(), query.len());
-
-        // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
-
-        Ok(())
-    }
-
-    #[sqlx::test]
-    #[serial]
-    #[ignore]
-    async fn test_retrieve_mbp1_futures_continuous_volume() -> anyhow::Result<()> {
-        dotenv::dotenv().ok();
-        let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("GLBX.MDP3")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Futures;
-        let instrument = Instrument::new(
-            None,
-            "HEJ4",
-            "LeanHogs-0424",
-            dataset,
-            Vendors::Databento,
-            vendor_data.encode(),
-            1712941200000000000,
-            1704067200000000000,
-            1712941200000000000,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Mock data
-        let records = vec![
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
-                price: 6770,
-                size: 1,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
-                price: 6870,
-                size: 2,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092565,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-        ];
-
-        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
-            .await
-            .expect("Error inserting records.");
-        let _ = transaction.commit().await;
-
-        // Test
-        let query_params = RetrieveParams {
-            symbols: vec!["HE.v.0".to_string()],
-            start_ts: 1704209103644092563,
-            end_ts: 1704209903644092567,
-            schema: Schema::Mbp1,
-            dataset: dataset.clone(),
-            stype: Stype::Continuous,
-        };
-
-        let mut cursor = Mbp1Msg::retrieve_query(&pool, &query_params, false, "".to_string())
-            .await
-            .expect("Error on retrieve records.");
-
-        // Validate
-        let mut query: Vec<RecordEnum> = vec![];
-        while let Some(row_result) = cursor.next().await {
-            match row_result {
-                Ok(row) => {
-                    let record = Mbp1Msg::from_row(&row, None)?;
-
-                    // Convert to RecordEnum and add to encoder
-                    let record_enum = RecordEnum::Mbp1(record);
-                    query.push(record_enum);
-                }
-                Err(e) => {
-                    error!("Error processing row: {:?}", e);
-                    return Err(e.into());
-                }
-            }
-        }
-        assert_eq!(records.len(), query.len());
 
         // Cleanup
         delete_instrument(instrument_id)
@@ -2833,94 +2541,6 @@ mod test {
             .expect("Error on delete");
 
         delete_instrument(instrument_id4)
-            .await
-            .expect("Error on delete");
-
-        Ok(())
-    }
-
-    #[sqlx::test]
-    #[serial]
-    #[ignore]
-    async fn test_retrieve_rolling_window_volume() -> anyhow::Result<()> {
-        dotenv::dotenv().ok();
-        let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("GLBX.MDP3")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Futures;
-        let instrument = Instrument::new(
-            None,
-            "HEJ4",
-            "LeanHogs-0424",
-            dataset,
-            Vendors::Databento,
-            vendor_data.encode(),
-            1712941200000000000,
-            1704067200000000000,
-            1712941200000000000,
-            true,
-        );
-
-        let dataset = Dataset::Futures;
-        let instrument2 = Instrument::new(
-            None,
-            "HEG4",
-            "LeanHogs-0224",
-            dataset,
-            Vendors::Databento,
-            vendor_data.encode(),
-            1707937194000000000,
-            1704067200000000000,
-            1707937194000000000,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let instrument_id2 = create_instrument(instrument2)
-            .await
-            .expect("Error creating instrument.");
-
-        // Test
-        let query_params = RetrieveParams {
-            symbols: vec!["HE.c.0".to_string()],
-            start_ts: 1705258794000000000,
-            end_ts: 1713117594000000000,
-            schema: Schema::Mbp1,
-            dataset: dataset.clone(),
-            stype: Stype::Continuous,
-        };
-
-        let vec = RollingWindow::retrieve_continuous_window(
-            &pool,
-            query_params.start_ts,
-            query_params.end_ts,
-            0,
-            vec!["HE%".to_string(), "LE%".to_string()],
-            &ContinuousKind::Calendar,
-        )
-        .await
-        .expect("Error on retrieve records.");
-
-        // Validate
-        assert!(vec["HE.c.0"].len() == 3);
-
-        // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
-
-        delete_instrument(instrument_id2)
             .await
             .expect("Error on delete");
 

@@ -239,15 +239,11 @@ impl RecordGetter {
                 let heap = self.heap.lock().await;
 
                 if heap.is_empty() {
-                    info!("heap empty");
-
                     if *self.end_tasks.lock().await {
-                        info!("end  of recorsd is set");
                         drop(heap);
                         *self.end_records.lock().await = true;
                         break;
                     } else {
-                        info!("flipping hep flags");
                         let flags = self.tasks_query_flag.lock().await;
 
                         for (_, flag) in flags.iter() {
@@ -315,27 +311,32 @@ impl RecordGetter {
             let query_handler = Arc::clone(&self);
             let _query_manager = tokio::spawn(async move {
                 loop {
-                    let all_queried = {
-                        let flags = query_handler.tasks_query_flag.lock().await;
-                        let mut done = true;
-                        for (_, flag) in flags.iter() {
-                            if !*flag.lock().await {
-                                done = false;
-                                break;
+                    if !*query_handler.end_tasks.lock().await{
+                        let all_queried = {
+                            let flags = query_handler.tasks_query_flag.lock().await;
+                            let mut done = true;
+                            for (_, flag) in flags.iter() {
+                                if !*flag.lock().await {
+                                    done = false;
+                                    break;
+                                }
+                            }
+                            done
+                        };
+
+                        // If all tasks  haev queried, set heap_process_flag and process heap
+                        if all_queried {
+                            // Set heap_process_flag to true, allowing heap to process
+                            *query_handler.heap_process_flag.lock().await = true;
+
+                            // Wait until the heap has processed
+                            while *query_handler.heap_process_flag.lock().await {
+                                tokio::task::yield_now().await;
                             }
                         }
-                        done
-                    };
-
-                    // If all tasks  haev queried, set heap_process_flag and process heap
-                    if all_queried {
-                        // Set heap_process_flag to true, allowing heap to process
+                    } else {
                         *query_handler.heap_process_flag.lock().await = true;
-
-                        // Wait until the heap has processed
-                        while *query_handler.heap_process_flag.lock().await {
-                            tokio::task::yield_now().await;
-                        }
+                        break;
                     }
                 }
             });
