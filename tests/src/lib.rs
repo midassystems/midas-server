@@ -415,7 +415,7 @@ mod tests {
         test_continuous_volume().await?;
 
         // Rolllover flag
-        // test_rollover_volume().await?;
+        test_rollover_volume().await?;
 
         // Cleanup
         teardown_tickers().await?;
@@ -458,7 +458,7 @@ mod tests {
         test_continuous_calendar().await?;
 
         // Rolllover flag
-        // test_rollover_calendar().await?;
+        test_rollover_calendar().await?;
 
         // Cleanup
         teardown_tickers().await?;
