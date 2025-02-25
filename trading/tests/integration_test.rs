@@ -1,15 +1,14 @@
 use anyhow::Result;
+use axum::body::to_bytes;
 use axum::Router;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use hyper::body::to_bytes;
-use hyper::body::HttpBody as _;
+use futures::stream::StreamExt;
 use mbinary::backtest::BacktestData;
 use mbinary::backtest_encode::BacktestEncoder;
 use serde::de::DeserializeOwned;
-use serde_json::json;
 use serial_test::serial;
 use std::convert::Infallible;
 use std::fs;
@@ -28,7 +27,7 @@ async fn parse_response<T: DeserializeOwned>(
     response: axum::response::Response,
 ) -> Result<ApiResponse<T>, Infallible> {
     // Extract the body as bytes
-    let body_bytes = to_bytes(response.into_body()).await.unwrap();
+    let body_bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
     let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
 
     // Deserialize the response body to ApiResponse for further assertions
@@ -60,20 +59,19 @@ async fn test_backtest_create() -> Result<()> {
     encoder.encode_signals(&backtest_data.signals);
 
     // Test
-    let json_body = json!(bytes);
     let request = Request::builder()
         .method("POST")
         .uri("/trading/backtest/create")
         .header("content-type", "application/json")
-        .body(Body::from(json_body.to_string()))
+        .body(Body::from(bytes))
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    let mut body_stream = response.into_body();
+    let mut body_stream = response.into_body().into_data_stream();
 
     // Validate
     let mut responses = Vec::new();
-    while let Some(chunk) = body_stream.data().await {
+    while let Some(chunk) = body_stream.next().await {
         match chunk {
             Ok(bytes) => {
                 let bytes_str = String::from_utf8_lossy(&bytes);
@@ -127,20 +125,19 @@ async fn test_backtest_get() -> Result<()> {
     encoder.encode_signals(&backtest_data.signals);
 
     // Test
-    let json_body = json!(bytes);
     let request = Request::builder()
         .method("POST")
         .uri("/trading/backtest/create")
         .header("content-type", "application/json")
-        .body(Body::from(json_body.to_string()))
+        .body(Body::from(bytes))
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    let mut body_stream = response.into_body();
+    let mut body_stream = response.into_body().into_data_stream();
 
     // Validate
     let mut responses = Vec::new();
-    while let Some(chunk) = body_stream.data().await {
+    while let Some(chunk) = body_stream.next().await {
         match chunk {
             Ok(bytes) => {
                 let bytes_str = String::from_utf8_lossy(&bytes);
@@ -208,20 +205,19 @@ async fn test_backtest_get_by_name() -> Result<()> {
     encoder.encode_signals(&backtest_data.signals);
 
     // Test
-    let json_body = json!(bytes);
     let request = Request::builder()
         .method("POST")
         .uri("/trading/backtest/create")
         .header("content-type", "application/json")
-        .body(Body::from(json_body.to_string()))
+        .body(Body::from(bytes))
         .unwrap();
 
     let response = app.oneshot(request).await.unwrap();
-    let mut body_stream = response.into_body();
+    let mut body_stream = response.into_body().into_data_stream();
 
     // Validate
     let mut responses = Vec::new();
-    while let Some(chunk) = body_stream.data().await {
+    while let Some(chunk) = body_stream.next().await {
         match chunk {
             Ok(bytes) => {
                 let bytes_str = String::from_utf8_lossy(&bytes);

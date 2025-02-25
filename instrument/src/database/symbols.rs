@@ -6,6 +6,7 @@ use mbinary::{
     vendors::Vendors,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
+use std::ops::DerefMut;
 use tracing::info;
 
 pub trait FromRow: Sized {
@@ -64,7 +65,7 @@ impl InstrumentsQueries for Instrument {
             "#,
         )
         .bind(dataset as i16)
-        .fetch_one(&mut *tx) // Borrow tx mutably
+        .fetch_one(tx.deref_mut()) // Borrow tx mutably
         .await?;
 
         let query = format!(
@@ -86,7 +87,7 @@ impl InstrumentsQueries for Instrument {
             .bind(self.first_available as i64)
             .bind(self.expiration_date as i64)
             .bind(self.active)
-            .execute(&mut *tx) // Borrow tx mutably
+            .execute(tx.deref_mut()) // Borrow tx mutably
             .await?;
 
         info!("Successfully created instrument with id: {}", instrument_id);
@@ -175,7 +176,7 @@ impl InstrumentsQueries for Instrument {
             .bind(self.expiration_date as i64)
             .bind(self.active)
             .bind(id as i32)
-            .execute(&mut *tx) // Borrow tx mutably
+            .execute(tx.deref_mut()) // Borrow tx mutably
             .await?;
 
         info!("Successfully updated instrument with id {}", id);
@@ -191,7 +192,7 @@ impl InstrumentsQueries for Instrument {
             "#,
         )
         .bind(&id)
-        .execute(tx)
+        .execute(tx.deref_mut())
         .await?;
 
         info!("Successfully deleted instrument with id {}", id);

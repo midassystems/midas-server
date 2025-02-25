@@ -1,9 +1,10 @@
 pub mod loader;
 
 use crate::{Error, Result};
+use axum::body::Body;
 use axum::response::IntoResponse;
-use axum::{body::StreamBody, Extension, Json};
 use axum::{routing::post, Router};
+use axum::{Extension, Json};
 use loader::RecordLoader;
 use mbinary::decode::Decoder;
 use sqlx::PgPool;
@@ -57,7 +58,7 @@ pub async fn create_record(
     let loader = RecordLoader::new(1000, metadata.dataset, pool).await?;
     let progress_stream = loader.process_records(decoder).await;
 
-    Ok(StreamBody::new(progress_stream))
+    Ok(Body::from_stream(progress_stream))
 }
 
 pub async fn bulk_upload(
@@ -78,7 +79,7 @@ pub async fn bulk_upload(
     let loader = RecordLoader::new(20_000, metadata.dataset, pool).await?;
     let progress_stream = loader.process_records(decoder).await;
 
-    Ok(StreamBody::new(progress_stream))
+    Ok(Body::from_stream(progress_stream))
 }
 
 #[cfg(test)]
@@ -89,7 +90,7 @@ mod test {
     use crate::database::init::init_db;
     use crate::response::ApiResponse;
     use crate::services::retrieve::get_records;
-    use hyper::body::HttpBody as _;
+    use futures::stream::StreamExt;
     use mbinary::encode::CombinedEncoder;
     use mbinary::metadata::Metadata;
     use mbinary::params::RetrieveParams;
@@ -286,14 +287,14 @@ mod test {
             .into_response();
 
         // Validate
-        let mut stream = response.into_body();
+        let mut stream = response.into_body().into_data_stream();
 
         // Vectors to store success and error responses
         let mut success_responses = Vec::new();
         let mut error_responses = Vec::new();
 
         // Collect streamed responses
-        while let Some(chunk) = stream.data().await {
+        while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
                     let bytes_str = String::from_utf8_lossy(&bytes);
@@ -437,14 +438,14 @@ mod test {
             .into_response();
 
         // Extract the body (which is a stream)
-        let mut stream = result.into_body();
+        let mut stream = result.into_body().into_data_stream();
 
         // Vectors to store success and error responses
         let mut success_responses = Vec::new();
         let mut error_responses = Vec::new();
 
         // Collect streamed responses
-        while let Some(chunk) = stream.data().await {
+        while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
                     let bytes_str = String::from_utf8_lossy(&bytes);
@@ -484,11 +485,11 @@ mod test {
             .await
             .into_response();
 
-        let mut body = response.into_body();
+        let mut body = response.into_body().into_data_stream();
 
         // Collect streamed response
         let mut all_bytes = Vec::new();
-        while let Some(chunk) = body.data().await {
+        while let Some(chunk) = body.next().await {
             match chunk {
                 Ok(bytes) => all_bytes.extend_from_slice(&bytes),
                 Err(e) => panic!("Error while reading chunk: {:?}", e),
@@ -621,14 +622,14 @@ mod test {
             .into_response();
 
         // Extract the body (which is a stream)
-        let mut stream = result.into_body();
+        let mut stream = result.into_body().into_data_stream();
 
         // Vectors to store success and error responses
         let mut success_responses = Vec::new();
         let mut error_responses = Vec::new();
 
         // Collect streamed responses
-        while let Some(chunk) = stream.data().await {
+        while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
                     let bytes_str = String::from_utf8_lossy(&bytes);

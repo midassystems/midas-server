@@ -6,6 +6,7 @@ use mbinary::{
 };
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Transaction};
+use std::ops::DerefMut;
 
 // Function to compute a unique hash for the order book state
 fn compute_order_book_hash(levels: &[BidAskPair]) -> String {
@@ -33,7 +34,10 @@ pub async fn rollback_all_batches(
 ) -> Result<()> {
     // info!("Rolling back to {}", last_id);
     let query = format!("DELETE FROM {}_mbp WHERE id > $1", dataset.as_str());
-    sqlx::query(&query).bind(last_id).execute(tx).await?;
+    sqlx::query(&query)
+        .bind(last_id)
+        .execute(tx.deref_mut())
+        .await?;
 
     Ok(())
 }
@@ -159,7 +163,7 @@ impl InsertBatch {
             .bind(&sequences)
             .bind(&discriminators)
             .bind(&order_book_hashes)
-            .fetch_all(&mut *tx)
+            .fetch_all(&mut **tx)
             .await?;
 
         // Create separate vectors for each field
@@ -205,7 +209,7 @@ impl InsertBatch {
             .bind(&ask_px)
             .bind(&ask_sz)
             .bind(&ask_ct)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
 
         // Clear the batch after committing
@@ -259,7 +263,7 @@ impl RecordInsertQueries for Mbp1Msg {
             .bind(self.sequence as i32)
             .bind(self.discriminator as i32)
             .bind(&order_book_hash) // Bind the computed hash
-            .fetch_one(&mut *tx)
+            .fetch_one(tx.deref_mut())
             .await?;
 
         let query = format!(
@@ -281,7 +285,7 @@ impl RecordInsertQueries for Mbp1Msg {
                 .bind(level.ask_px)
                 .bind(level.ask_sz as i32)
                 .bind(level.ask_ct as i32)
-                .execute(&mut *tx)
+                .execute(tx.deref_mut())
                 .await?;
         }
 

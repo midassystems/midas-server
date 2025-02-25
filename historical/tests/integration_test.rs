@@ -1,12 +1,12 @@
 use anyhow::Result;
+use axum::body::to_bytes;
 use axum::Router;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use futures::stream::StreamExt;
 use historical::{database::init::init_db, response::ApiResponse, router::router};
-use hyper::body::to_bytes;
-use hyper::body::HttpBody as _;
 use mbinary::encode::CombinedEncoder;
 use mbinary::metadata::Metadata;
 use mbinary::params::RetrieveParams;
@@ -114,7 +114,7 @@ async fn parse_response<T: DeserializeOwned>(
     response: axum::response::Response,
 ) -> Result<ApiResponse<T>, Infallible> {
     // Extract the body as bytes
-    let body_bytes = to_bytes(response.into_body()).await.unwrap();
+    let body_bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
     let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
 
     // Deserialize the response body to ApiResponse for further assertions
@@ -231,11 +231,11 @@ async fn test_records_create() -> Result<()> {
 
     // Validate
     // Stream and parse the response body
-    let mut body_stream = response.into_body();
+    let mut body_stream = response.into_body().into_data_stream();
 
     // Collect the response body as bytes
     let mut responses = Vec::new();
-    while let Some(chunk) = body_stream.data().await {
+    while let Some(chunk) = body_stream.next().await {
         match chunk {
             Ok(bytes) => {
                 let bytes_str = String::from_utf8_lossy(&bytes);
@@ -360,11 +360,11 @@ async fn test_records_get() -> Result<()> {
     let response = app.oneshot(request).await.unwrap();
 
     // Stream and parse the response body
-    let mut body_stream = response.into_body();
+    let mut body_stream = response.into_body().into_data_stream();
 
     // Collect the response body as bytes
     let mut responses = Vec::new();
-    while let Some(chunk) = body_stream.data().await {
+    while let Some(chunk) = body_stream.next().await {
         match chunk {
             Ok(bytes) => {
                 let bytes_str = String::from_utf8_lossy(&bytes);
@@ -403,7 +403,9 @@ async fn test_records_get() -> Result<()> {
     let body = response.into_body();
 
     // Convert the body to bytes
-    let bytes = to_bytes(body).await.expect("Failed to read response body");
+    let bytes = to_bytes(body, 1024 * 1024)
+        .await
+        .expect("Failed to read response body");
 
     // Convert bytes to Vec<u8>
     let all_bytes: Vec<u8> = bytes.to_vec();
@@ -528,11 +530,11 @@ async fn test_records_create_bulk() -> Result<()> {
 
     // Validate
     // Stream and parse the response body
-    let mut body_stream = response.into_body();
+    let mut body_stream = response.into_body().into_data_stream();
 
     // Collect the response body as bytes
     let mut responses = Vec::new();
-    while let Some(chunk) = body_stream.data().await {
+    while let Some(chunk) = body_stream.next().await {
         match chunk {
             Ok(bytes) => {
                 let bytes_str = String::from_utf8_lossy(&bytes);
@@ -648,11 +650,11 @@ async fn test_records_create_bulk_duplicate_error() -> Result<()> {
 
     // Validate
     // Stream and parse the response body
-    let mut body_stream = response.into_body();
+    let mut body_stream = response.into_body().into_data_stream();
 
     // Collect the response body as bytes
     let mut responses = Vec::new();
-    while let Some(chunk) = body_stream.data().await {
+    while let Some(chunk) = body_stream.next().await {
         match chunk {
             Ok(bytes) => {
                 let bytes_str = String::from_utf8_lossy(&bytes);

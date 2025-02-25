@@ -5,8 +5,8 @@ pub mod retriever;
 
 use crate::Result;
 use axum::response::IntoResponse;
-use axum::{body::StreamBody, Extension, Json};
-use axum::{routing::get, Router};
+use axum::{body::Body, routing::get, Router};
+use axum::{Extension, Json};
 use mbinary::params::RetrieveParams;
 use retriever::RecordGetter;
 use sqlx::PgPool;
@@ -31,7 +31,7 @@ pub async fn get_records(
     let loader = Arc::new(RecordGetter::new(1000000, params, pool).await?);
     let progress_stream = loader.stream().await;
 
-    Ok(StreamBody::new(progress_stream))
+    Ok(Body::from_stream(progress_stream))
 }
 
 #[cfg(test)]
@@ -42,7 +42,7 @@ mod test {
     use crate::services::load::create_record;
     use axum::response::IntoResponse;
     use axum::{Extension, Json};
-    use hyper::body::HttpBody as _;
+    use futures::stream::StreamExt;
     use mbinary::encode::CombinedEncoder;
     use mbinary::enums::Dataset;
     use mbinary::metadata::Metadata;
@@ -239,10 +239,11 @@ mod test {
             .await
             .expect("Error creating records.")
             .into_response();
-        let mut stream = response.into_body();
+
+        let mut stream = response.into_body().into_data_stream();
 
         // Collect streamed responses
-        while let Some(chunk) = stream.data().await {
+        while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
                     let bytes_str = String::from_utf8_lossy(&bytes);
@@ -277,11 +278,11 @@ mod test {
             .await
             .into_response();
 
-        let mut body = response.into_body();
+        let mut body = response.into_body().into_data_stream();
 
         // Collect streamed response
         let mut buffer = Vec::new();
-        while let Some(chunk) = body.data().await {
+        while let Some(chunk) = body.next().await {
             match chunk {
                 Ok(bytes) => {
                     // println!("{:?}", bytes);
@@ -410,10 +411,10 @@ mod test {
             .await
             .expect("Error creating records.")
             .into_response();
-        let mut stream = response.into_body();
+        let mut stream = response.into_body().into_data_stream();
 
         // Collect streamed responses
-        while let Some(chunk) = stream.data().await {
+        while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
                     let bytes_str = String::from_utf8_lossy(&bytes);
@@ -445,11 +446,11 @@ mod test {
             .await
             .into_response();
 
-        let mut body = response.into_body();
+        let mut body = response.into_body().into_data_stream();
 
         // Collect streamed response
         let mut buffer = Vec::new();
-        while let Some(chunk) = body.data().await {
+        while let Some(chunk) = body.next().await {
             match chunk {
                 Ok(bytes) => buffer.extend_from_slice(&bytes),
                 Err(e) => panic!("Error while reading chunk: {:?}", e),
@@ -525,11 +526,11 @@ mod test {
             .await
             .into_response();
 
-        let mut body = response.into_body();
+        let mut body = response.into_body().into_data_stream();
 
         // Collect streamed response
         let mut buffer = Vec::new();
-        while let Some(chunk) = body.data().await {
+        while let Some(chunk) = body.next().await {
             match chunk {
                 Ok(bytes) => buffer.extend_from_slice(&bytes),
                 Err(e) => panic!("Error while reading chunk: {:?}", e),
@@ -573,11 +574,11 @@ mod test {
             .await
             .into_response();
 
-        let mut body = response.into_body();
+        let mut body = response.into_body().into_data_stream();
 
         // Collect streamed response
         let mut buffer = Vec::new();
-        while let Some(chunk) = body.data().await {
+        while let Some(chunk) = body.next().await {
             match chunk {
                 Ok(bytes) => buffer.extend_from_slice(&bytes),
                 Err(e) => panic!("Error while reading chunk: {:?}", e),

@@ -4,6 +4,7 @@ use mbinary::backtest::{
     BacktestData, Parameters, SignalInstructions, Signals, StaticStats, TimeseriesStats, Trades,
 };
 use sqlx::{PgPool, Postgres, Row, Transaction};
+use std::ops::DerefMut;
 use tracing::info;
 
 pub fn dynamic_table(backtest_flag: bool, table_name: &str) -> (String, String) {
@@ -41,7 +42,7 @@ pub async fn create_backtest_query(
             "#,
     )
     .bind(backtest_name)
-    .fetch_one(tx)
+    .fetch_one(tx.deref_mut())
     .await?;
 
     // Extract the id directly from the row
@@ -62,7 +63,7 @@ impl BacktestDataQueries for BacktestData {
             "#,
         )
         .bind(backtest_id)
-        .execute(tx)
+        .execute(tx.deref_mut())
         .await?;
 
         info!("Successfully deleted backtest with id {}", backtest_id);
@@ -166,7 +167,7 @@ impl ParametersQueries for Parameters {
             .bind(&self.start)
             .bind(&self.end)
             .bind(&self.tickers)
-            .execute(tx)
+            .execute(tx.deref_mut())
             .await?;
         Ok(())
     }
@@ -264,7 +265,7 @@ impl StaticStatsQueries for StaticStats {
         .bind(&self.max_drawdown_percentage_daily)
         .bind(&self.sharpe_ratio)
         .bind(&self.sortino_ratio)
-        .execute(tx)
+        .execute(tx.deref_mut())
         .await?;
         Ok(())
     }
@@ -362,7 +363,7 @@ impl TimeseriesQueries for TimeseriesStats {
         .bind(&self.percent_drawdown)
         .bind(&self.cumulative_return)
         .bind(&self.period_return)
-        .execute(tx)
+        .execute(tx.deref_mut())
         .await?;
         Ok(())
     }
@@ -432,7 +433,7 @@ impl TradesQueries for Trades {
             .bind(&self.trade_cost)
             .bind(&self.action)
             .bind(&self.fees)
-            .execute(tx)
+            .execute(tx.deref_mut())
             .await?;
         Ok(())
     }
@@ -505,7 +506,7 @@ impl SignalInstructionsQueries for SignalInstructions {
             .bind(&self.quantity)
             .bind(&self.limit_price)
             .bind(&self.aux_price)
-            .execute(tx)
+            .execute(tx.deref_mut())
             .await?;
 
         Ok(())
@@ -573,7 +574,7 @@ impl SignalQueries for Signals {
         let result = sqlx::query(&query)
             .bind(&id)
             .bind(&self.timestamp)
-            .fetch_one(tx)
+            .fetch_one(tx.deref_mut())
             .await?;
 
         // Extract the id directly from the row

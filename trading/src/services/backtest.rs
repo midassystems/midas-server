@@ -6,12 +6,13 @@ use crate::database::backtest::BacktestDataQueries;
 use crate::error::Result;
 use crate::response::ApiResponse;
 use crate::Error;
-use axum::body::StreamBody;
+use axum::body::Body;
 use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::{Extension, Json, Router};
+use futures::stream::StreamExt;
 use loader::BacktestLoader;
 use mbinary::backtest::BacktestData;
 use mbinary::backtest_decoder::BacktestDecoder;
@@ -20,7 +21,6 @@ use sqlx::PgPool;
 use std::collections::hash_map::HashMap;
 use std::io::Cursor;
 use tracing::{error, info};
-
 // Service
 pub fn backtest_service() -> Router {
     Router::new()
@@ -33,9 +33,28 @@ pub fn backtest_service() -> Router {
 // Handlers
 pub async fn create_backtest(
     Extension(pool): Extension<PgPool>,
-    Json(encoded_data): Json<Vec<u8>>,
+    stream: Body,
+    // stream: StreamBody<Vec<u8>>,
+    // Json(encoded_data): Json<Vec<u8>>,
 ) -> Result<impl IntoResponse> {
     info!("Handling request to create backtest from binary data");
+    let mut stream = stream.into_data_stream();
+    let mut encoded_data = Vec::new();
+    info!("Porcessing chunk");
+
+    // Read chunks from the stream
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(bytes) => {
+                encoded_data.extend_from_slice(&bytes);
+                info!("Chunk processed :{:?}", bytes);
+            }
+            Err(e) => {
+                error!("Failed to list backtests: {:?}", e);
+                return Err(e.into());
+            }
+        }
+    }
 
     // Decode received binary data
     let cursor = Cursor::new(encoded_data);
@@ -45,7 +64,7 @@ pub async fn create_backtest(
     let loader = BacktestLoader::new(pool).await?;
     let progress_stream = loader.process_stream(decoder).await;
 
-    Ok(StreamBody::new(progress_stream))
+    Ok(Body::from_stream(progress_stream))
 }
 
 pub async fn list_backtest(Extension(pool): Extension<PgPool>) -> Result<impl IntoResponse> {
@@ -139,8 +158,8 @@ pub async fn delete_backtest(
 mod test {
     use super::*;
     use crate::database::init::init_db;
-    use hyper::body::to_bytes;
-    use hyper::body::HttpBody as _;
+    use axum::body::to_bytes;
+    use futures::stream::StreamExt;
     use mbinary::backtest_encode::BacktestEncoder;
     use serde::de::DeserializeOwned;
     use serial_test::serial;
@@ -150,7 +169,7 @@ mod test {
         response: axum::response::Response,
     ) -> anyhow::Result<ApiResponse<T>> {
         // Extract the body as bytes
-        let body_bytes = to_bytes(response.into_body()).await.unwrap();
+        let body_bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
         let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
 
         // Deserialize the response body to ApiResponse for further assertions
@@ -179,21 +198,23 @@ mod test {
         encoder.encode_trades(&backtest_data.trades);
         encoder.encode_signals(&backtest_data.signals);
 
+        let body = Body::from(bytes);
+
         // Test
-        let result = create_backtest(Extension(pool.clone()), Json(bytes))
+        let result = create_backtest(Extension(pool.clone()), body)
             .await
             .unwrap()
             .into_response();
 
         // Validate
-        let mut stream = result.into_body();
+        let mut stream = result.into_body().into_data_stream();
 
         // Vectors to store success and error responses
         let mut success_responses = Vec::new();
         let mut error_responses = Vec::new();
 
         // Collect streamed responses
-        while let Some(chunk) = stream.data().await {
+        while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
                     let bytes_str = String::from_utf8_lossy(&bytes);
@@ -249,19 +270,20 @@ mod test {
         encoder.encode_signals(&backtest_data.signals);
 
         // Test
-        let result = create_backtest(Extension(pool.clone()), Json(bytes))
+        let body = Body::from(bytes);
+        let result = create_backtest(Extension(pool.clone()), body)
             .await
             .unwrap()
             .into_response();
 
-        let mut stream = result.into_body();
+        let mut stream = result.into_body().into_data_stream();
 
         // Vectors to store success and error responses
         let mut success_responses = Vec::new();
         let mut error_responses = Vec::new();
 
         // Collect streamed responses
-        while let Some(chunk) = stream.data().await {
+        while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
                     let bytes_str = String::from_utf8_lossy(&bytes);
@@ -326,19 +348,20 @@ mod test {
         encoder.encode_signals(&backtest_data.signals);
 
         // Test
-        let result = create_backtest(Extension(pool.clone()), Json(bytes))
+        let body = Body::from(bytes);
+        let result = create_backtest(Extension(pool.clone()), body)
             .await
             .unwrap()
             .into_response();
 
-        let mut stream = result.into_body();
+        let mut stream = result.into_body().into_data_stream();
 
         // Vectors to store success and error responses
         let mut success_responses = Vec::new();
         let mut error_responses = Vec::new();
 
         // Collect streamed responses
-        while let Some(chunk) = stream.data().await {
+        while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
                     let bytes_str = String::from_utf8_lossy(&bytes);
@@ -407,19 +430,20 @@ mod test {
         encoder.encode_signals(&backtest_data.signals);
 
         // Test
-        let result = create_backtest(Extension(pool.clone()), Json(bytes))
+        let body = Body::from(bytes);
+        let result = create_backtest(Extension(pool.clone()), body)
             .await
             .unwrap()
             .into_response();
 
-        let mut stream = result.into_body();
+        let mut stream = result.into_body().into_data_stream();
 
         // Vectors to store success and error responses
         let mut success_responses = Vec::new();
         let mut error_responses = Vec::new();
 
         // Collect streamed responses
-        while let Some(chunk) = stream.data().await {
+        while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
                     let bytes_str = String::from_utf8_lossy(&bytes);

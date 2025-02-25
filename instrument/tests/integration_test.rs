@@ -1,10 +1,10 @@
 use anyhow::Result;
+use axum::body::to_bytes;
 use axum::Router;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use hyper::body::to_bytes;
 use instrument::database::init::init_db;
 use instrument::response::ApiResponse;
 use instrument::router::router;
@@ -29,7 +29,7 @@ async fn parse_response<T: DeserializeOwned>(
     response: axum::response::Response,
 ) -> Result<ApiResponse<T>, Infallible> {
     // Extract the body as bytes
-    let body_bytes = to_bytes(response.into_body()).await.unwrap();
+    let body_bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
     let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
 
     // Deserialize the response body to ApiResponse for further assertions
