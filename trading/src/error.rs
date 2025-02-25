@@ -21,6 +21,8 @@ pub enum Error {
     MbinaryError(#[from] mbinary::error::Error),
     #[error("Custom error: {0}")]
     CustomError(String),
+    #[error("Axum error:{0}")]
+    AxumError(#[from] axum::Error),
 }
 
 impl Into<ApiResponse<String>> for Error {
@@ -33,6 +35,7 @@ impl Into<ApiResponse<String>> for Error {
             Error::GeneralError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
             Error::MbinaryError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
             Error::CustomError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
+            Error::AxumError(ref msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.to_string()),
         };
 
         ApiResponse {

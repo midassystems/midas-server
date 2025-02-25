@@ -37,7 +37,7 @@ if [[ "$ENV" == "dev" ]]; then
 	mkdir -p postgres/data
 
 	# Development deployment (most basic)
-	if docker compose -f docker-compose.dev.yml up -d; then
+	if docker compose -f docker-compose.dev.yml up --build -d; then
 		echo "Docker Compose deployment for development succeeded."
 	else
 		echo "Docker Compose deployment for development failed."

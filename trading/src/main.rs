@@ -1,6 +1,6 @@
 use dotenv::dotenv;
 use std::env;
-use std::net::SocketAddr;
+use tokio::net::TcpListener;
 use trading::database::init::init_db;
 use trading::logger::system_logger;
 use trading::router::router;
@@ -26,14 +26,14 @@ async fn main() -> Result<()> {
         .parse()
         .expect("PORT environment variable is not a valid u16 integer."); // Error if PORT is not valid
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    tracing::info!("Listening on {}", addr);
+    // let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    let path = format!("0.0.0.0:{}", port);
+    let listener = TcpListener::bind(path.clone()).await.unwrap();
+    tracing::info!("Listening on {}", path);
 
     // Run the server
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .expect("error on connection.");
+    axum::serve(listener, app).await.unwrap();
+    // axum::serve(listener, app);
 
     Ok(())
 }

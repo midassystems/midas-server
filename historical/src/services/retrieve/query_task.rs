@@ -306,7 +306,7 @@ mod test {
     use axum::response::IntoResponse;
     use axum::{Extension, Json};
     use dotenv;
-    use hyper::body::HttpBody as _;
+    // use hyper::body::HttpBody as _;
     use mbinary::encode::CombinedEncoder;
     use mbinary::enums::Dataset;
     use mbinary::enums::{Schema, Stype};
@@ -639,10 +639,11 @@ mod test {
             .await
             .expect("Error creating records.")
             .into_response();
-        let mut stream = response.into_body();
+
+        let mut stream = response.into_body().into_data_stream();
 
         // Collect streamed responses
-        while let Some(chunk) = stream.data().await {
+        while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
                     let bytes_str = String::from_utf8_lossy(&bytes);
@@ -764,10 +765,11 @@ mod test {
             .await
             .expect("Error creating records.")
             .into_response();
-        let mut stream = response.into_body();
+
+        let mut stream = response.into_body().into_data_stream();
 
         // Collect streamed responses
-        while let Some(chunk) = stream.data().await {
+        while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
                     let bytes_str = String::from_utf8_lossy(&bytes);
@@ -891,10 +893,11 @@ mod test {
             .await
             .expect("Error creating records.")
             .into_response();
-        let mut stream = response.into_body();
+
+        let mut stream = response.into_body().into_data_stream();
 
         // Collect streamed responses
-        while let Some(chunk) = stream.data().await {
+        while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
                     let bytes_str = String::from_utf8_lossy(&bytes);

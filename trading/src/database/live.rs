@@ -5,6 +5,7 @@ use mbinary::backtest::{Parameters,   Signals, Trades};
 use crate::database::backtest::{ParametersQueries, SignalQueries, SignalInstructionsQueries, TradesQueries};
 use sqlx::{PgPool, Postgres, Row, Transaction};
 use tracing::info;
+use std::ops::DerefMut;
 
 #[async_trait]
 pub trait LiveDataQueries {
@@ -26,7 +27,7 @@ impl LiveDataQueries for LiveData {
             RETURNING id
             "#,
         )
-        .fetch_one(tx)
+        .fetch_one(tx.deref_mut())
         .await?;
 
         // Extract the id directly from the row
@@ -45,7 +46,7 @@ impl LiveDataQueries for LiveData {
             "#,
         )
         .bind(live_id)
-        .execute(tx)
+        .execute(tx.deref_mut())
         .await?;
 
         info!("Successfully deleted live with id {}", live_id);
@@ -131,7 +132,7 @@ impl AccountSummaryQueries for AccountSummary {
         .bind(&self.end_net_liquidation)
         .bind(&self.end_total_cash_balance) 
         .bind(&self.end_unrealized_pnl)
-        .execute(tx)
+        .execute(tx.deref_mut())
         .await?;
         Ok(())
     }

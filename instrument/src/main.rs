@@ -4,7 +4,7 @@ use instrument::logger::system_logger;
 use instrument::router::router;
 use instrument::Result;
 use std::env;
-use std::net::SocketAddr;
+use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -26,14 +26,12 @@ async fn main() -> Result<()> {
         .parse()
         .expect("PORT environment variable is not a valid u16 integer."); // Error if PORT is not valid
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    tracing::info!("Listening on {}", addr);
+    let path = format!("0.0.0.0:{}", port);
+    let listener = TcpListener::bind(path.clone()).await.unwrap();
+    tracing::info!("Listening on {}", path);
 
     // Run the server
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .expect("error on connection.");
+    axum::serve(listener, app).await.unwrap();
 
     Ok(())
 }

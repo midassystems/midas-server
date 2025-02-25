@@ -1,6 +1,6 @@
 use async_compression::tokio::bufread::ZstdDecoder;
 use databento::dbn::Record as dbnRecord;
-use databento::{dbn, historical::timeseries::AsyncDbnDecoder};
+use databento::historical::timeseries::AsyncDbnDecoder;
 use mbinary::decode::AsyncDecoder;
 use mbinary::record_enum::RecordEnum;
 use mbinary::records::Record;

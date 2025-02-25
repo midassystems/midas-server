@@ -208,7 +208,7 @@ mod test {
 
     use super::*;
     use crate::database::init::init_db;
-    use hyper::body::to_bytes;
+    use axum::body::to_bytes;
     use mbinary::vendors::{DatabentoData, VendorData};
     use regex::Regex;
     use serde::de::DeserializeOwned;
@@ -230,7 +230,7 @@ mod test {
         response: axum::response::Response,
     ) -> anyhow::Result<ApiResponse<T>> {
         // Extract the body as bytes
-        let body_bytes = to_bytes(response.into_body()).await.unwrap();
+        let body_bytes = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
         let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
 
         // Deserialize the response body to ApiResponse for further assertions

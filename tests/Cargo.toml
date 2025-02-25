@@ -10,22 +10,23 @@ reqwest = {version ="0.12.5", features = ["json"]}
 serde = {version="1.0.204"}
 serde_json = "1.0"
 anyhow ="1.0.86"
-thiserror ={version = "1.0.63"}
-derive_more = {version = "1.0.0-beta", features = ["from"]}
+thiserror ={version = "2.0.11"}
+derive_more = {version = "2.0.1", features = ["from"]}
 chrono = "0.4"
 futures-util = "0.3"  
-axum = "0.6"
+axum = "0.8.1"
 async-trait = "0.1.83"
 mockito = "1.6.1"
-databento = "0.14.1"
+dbn = "0.28.0"
+databento = "0.20.0"
 async-compression = { version = "0.4.11", features = ["tokio", "zstd"] }
-ctor = "0.1"
-mbinary = {version= "1.0.23"}
-midas-client = {version = "1.0.18"}
+ctor = "0.3.6"
+mbinary = {version= "1.0.24"}
+midas-client = {version = "1.0.19"}
 midas-clilib = { git = "https://github.com/midassystems/midas-shell.git", branch =  "main" }
 
 [dev-dependencies]
 serial_test = "3.1.1"
 regex = "1.3.9"
-dbn = "0.22.1"
-databento ="0.14.1"
+dbn = "0.28.0"
+databento ="0.20.0"
