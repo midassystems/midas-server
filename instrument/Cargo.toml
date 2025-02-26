@@ -16,7 +16,7 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "json"]
 thiserror = "2.0.11"
 anyhow = "1.0.86"
 bytes = "1.7.1"
-mbinary = {version= "1.0.24"}
+mbinary = {version= "1.0.26"}
 
 [dev-dependencies]
 hyper = "1.6.0"

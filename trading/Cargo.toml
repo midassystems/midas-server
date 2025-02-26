@@ -22,8 +22,7 @@ bytes = "1.7.1"
 http-body = "1.0.1"
 http-body-util = "0.1.2"
 tokio-stream = "0.1.17"
-mbinary = {version= "1.0.24"}
-
+mbinary = {version= "1.0.26"}
 
 [dev-dependencies]
 hyper = "1.6"

@@ -21,8 +21,8 @@ dbn = "0.28.0"
 databento = "0.20.0"
 async-compression = { version = "0.4.11", features = ["tokio", "zstd"] }
 ctor = "0.3.6"
-mbinary = {version= "1.0.24"}
-midas-client = {version = "1.0.19"}
+mbinary = {version= "1.0.26"}
+midas-client = {version = "1.0.21"}
 midas-clilib = { git = "https://github.com/midassystems/midas-shell.git", branch =  "main" }
 
 [dev-dependencies]

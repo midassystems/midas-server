@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS bt_Trade (
     id SERIAL PRIMARY KEY,
     backtest_id INTEGER NOT NULL,
     trade_id INTEGER NOT NULL,
-    leg_id INTEGER NOT NULL,
+    signal_id INTEGER NOT NULL,
     timestamp BIGINT NOT NULL,
     ticker VARCHAR(50) NOT NULL,
     quantity BIGINT NOT NULL,
@@ -114,12 +114,11 @@ CREATE TABLE IF NOT EXISTS bt_Signal (
 CREATE TABLE IF NOT EXISTS bt_SignalInstructions (
     id SERIAL PRIMARY KEY,
     backtest_id INTEGER NOT NULL,
-    signal_id INTEGER NOT NULL,
+    signal_id_fk INTEGER NOT NULL,
     ticker VARCHAR(100) NOT NULL,
     order_type VARCHAR(25) NOT NULL,
     action VARCHAR(10) NOT NULL,
-    trade_id INTEGER NOT NULL,
-    leg_id INTEGER NOT NULL,
+    signal_id INTEGER NOT NULL,
     weight BIGINT NOT NULL,
     quantity INTEGER NOT NULL,
     limit_price VARCHAR(50) NOT NULL,
@@ -129,7 +128,7 @@ CREATE TABLE IF NOT EXISTS bt_SignalInstructions (
         REFERENCES Backtest(id)
         ON DELETE CASCADE,
     CONSTRAINT fk_signal_id
-      FOREIGN KEY(signal_id)
+      FOREIGN KEY(signal_id_fk)
         REFERENCES bt_Signal(id)
         ON DELETE CASCADE
 );
@@ -160,7 +159,7 @@ CREATE TABLE IF NOT EXISTS lv_Trade (
     id SERIAL PRIMARY KEY,
     live_id INTEGER NOT NULL,
     trade_id INTEGER NOT NULL,
-    leg_id INTEGER NOT NULL,
+    signal_id INTEGER NOT NULL,
     timestamp BIGINT NOT NULL,
     ticker VARCHAR(50) NOT NULL,
     quantity BIGINT NOT NULL,
@@ -188,12 +187,11 @@ CREATE TABLE IF NOT EXISTS lv_Signal (
 CREATE TABLE IF NOT EXISTS lv_SignalInstructions (
     id SERIAL PRIMARY KEY,
     live_id INTEGER NOT NULL,
-    signal_id INTEGER NOT NULL,
+    signal_id_fk INTEGER NOT NULL,
     ticker VARCHAR(100) NOT NULL,
     order_type VARCHAR(25) NOT NULL,
     action VARCHAR(10) NOT NULL,
-    trade_id INTEGER NOT NULL,
-    leg_id INTEGER NOT NULL,
+    signal_id INTEGER NOT NULL,
     weight BIGINT NOT NULL,
     quantity INTEGER NOT NULL,
     limit_price VARCHAR(50) NOT NULL,
@@ -203,7 +201,7 @@ CREATE TABLE IF NOT EXISTS lv_SignalInstructions (
         REFERENCES Live(id)
         ON DELETE CASCADE,
     CONSTRAINT fk_signal_id
-      FOREIGN KEY(signal_id)
+      FOREIGN KEY(signal_id_fk)
         REFERENCES lv_Signal(id)
         ON DELETE CASCADE
 );

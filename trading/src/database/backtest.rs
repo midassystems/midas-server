@@ -415,7 +415,7 @@ impl TradesQueries for Trades {
 
         let query = format!(
             r#"
-            INSERT INTO {} ({}, trade_id, leg_id, timestamp, ticker, quantity, avg_price, trade_value, trade_cost, action, fees)
+            INSERT INTO {} ({}, trade_id, signal_id, timestamp, ticker, quantity, avg_price, trade_value, trade_cost, action, fees)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             "#,
             table_name, id_name
@@ -424,7 +424,7 @@ impl TradesQueries for Trades {
         sqlx::query(&query)
             .bind(&id)
             .bind(&self.trade_id)
-            .bind(&self.leg_id)
+            .bind(&self.signal_id)
             .bind(&self.timestamp)
             .bind(&self.ticker)
             .bind(&self.quantity)
@@ -443,7 +443,7 @@ impl TradesQueries for Trades {
 
         let query = format!(
             r#"
-            SELECT {}, trade_id, leg_id, timestamp, ticker, quantity, avg_price, trade_value, trade_cost, action, fees
+            SELECT {}, trade_id, signal_id, timestamp, ticker, quantity, avg_price, trade_value, trade_cost, action, fees
             FROM {}
             WHERE {} = $1
             "#,
@@ -488,8 +488,8 @@ impl SignalInstructionsQueries for SignalInstructions {
 
         let query = format!(
             r#"
-            INSERT INTO {} ({}, signal_id, ticker, order_type, action, trade_id, leg_id, weight, quantity, limit_price, aux_price)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            INSERT INTO {} ({}, signal_id_fk, ticker, order_type, action, signal_id, weight, quantity, limit_price, aux_price)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             "#,
             table_name, id_name
         );
@@ -500,8 +500,7 @@ impl SignalInstructionsQueries for SignalInstructions {
             .bind(&self.ticker)
             .bind(&self.order_type)
             .bind(&self.action)
-            .bind(&self.trade_id)
-            .bind(&self.leg_id)
+            .bind(&self.signal_id)
             .bind(&self.weight)
             .bind(&self.quantity)
             .bind(&self.limit_price)
@@ -522,9 +521,9 @@ impl SignalInstructionsQueries for SignalInstructions {
 
         let query = format!(
             r#"
-            SELECT ticker, order_type, action, trade_id, leg_id, weight, quantity, limit_price, aux_price
+            SELECT ticker, order_type, action, signal_id, weight, quantity, limit_price, aux_price
             FROM {}
-            WHERE {} = $1 AND signal_id = $2
+            WHERE {} = $1 AND signal_id_fk = $2
             "#,
             table_name, id_name
         );
