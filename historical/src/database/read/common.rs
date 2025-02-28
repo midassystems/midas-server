@@ -3,8 +3,8 @@ use super::{
         EQUITIES_BBO_QUERY, EQUITIES_MBP1_QUERY, EQUITIES_OHLCV_QUERY, EQUITIES_TRADE_QUERY,
     },
     futures::{
-        FUTURES_BBO_QUERY, FUTURES_CONTINUOUS_CALENDAR, FUTURES_CONTINUOUS_VOLUME,
-        FUTURES_MBP1_QUERY, FUTURES_OHLCV_QUERY, FUTURES_TRADE_QUERY,
+        FUTURES_BBO_QUERY, FUTURES_CALENDAR_ROLLING_WINDOW, FUTURES_MBP1_QUERY,
+        FUTURES_OHLCV_QUERY, FUTURES_TRADE_QUERY, FUTURES_VOLUME_ROLLING_WINDOW,
     },
     option::{OPTION_BBO_QUERY, OPTION_MBP1_QUERY, OPTION_OHLCV_QUERY, OPTION_TRADE_QUERY},
 };
@@ -75,49 +75,23 @@ impl RollingWindow {
 
     pub async fn retrieve_continuous_window(
         pool: &PgPool,
-        mut start_ts: i64,
-        mut end_ts: i64,
+        start_ts: i64,
+        end_ts: i64,
         rank: i32,
         symbols: Vec<String>,
         continuous_kind: &ContinuousKind,
     ) -> Result<HashMap<String, Vec<RollingWindow>>> {
         let query = match continuous_kind {
-            ContinuousKind::Volume => FUTURES_CONTINUOUS_VOLUME,
-            ContinuousKind::Calendar => FUTURES_CONTINUOUS_CALENDAR,
+            ContinuousKind::Volume => FUTURES_VOLUME_ROLLING_WINDOW,
+            ContinuousKind::Calendar => FUTURES_CALENDAR_ROLLING_WINDOW,
             ContinuousKind::None => {
                 return Err(Error::CustomError("Invalid continous type".to_string()))
             }
         };
-        let final_ts = end_ts;
-        RollingWindow::adjust_end_ts(start_ts, &mut end_ts).await?;
 
         // Create a HashMap to store the results
-        let mut raw_map: HashMap<String, HashMap<String, RollingWindow>> = HashMap::new();
+        let mut result_map: HashMap<String, Vec<RollingWindow>> = HashMap::new();
 
-        while end_ts < final_ts {
-            // Execute continuous query
-            let objs: Vec<RollingWindow> = sqlx::query_as(query)
-                .bind(start_ts)
-                .bind(end_ts - 1)
-                .bind(&symbols)
-                .bind(rank)
-                .fetch_all(pool)
-                .await?;
-
-            // Upated raw_symbols, adds symbo if new elseupdate end_ts
-            for obj in objs {
-                let ticker_map = raw_map
-                    .entry(obj.continuous_ticker.clone())
-                    .or_insert_with(HashMap::new);
-                let entry = ticker_map.entry(obj.ticker.clone()).or_insert(obj.clone());
-
-                // Update end_time if new window extends further
-                entry.end_time = entry.end_time.max(obj.end_time);
-            }
-
-            start_ts = end_ts;
-            end_ts = (end_ts + 86_400_000_000_000).min(final_ts);
-        }
         // Execute continuous query
         let objs: Vec<RollingWindow> = sqlx::query_as(query)
             .bind(start_ts)
@@ -127,21 +101,13 @@ impl RollingWindow {
             .fetch_all(pool)
             .await?;
 
-        // Upated raw_symbols, adds symbo if new elseupdate end_ts
-        for obj in objs {
-            let ticker_map = raw_map
-                .entry(obj.continuous_ticker.clone())
-                .or_insert_with(HashMap::new);
-            let entry = ticker_map.entry(obj.ticker.clone()).or_insert(obj.clone());
-
-            // Update end_time if new window extends further
-            entry.end_time = entry.end_time.max(obj.end_time);
-        }
-
         // Final result: Collapse inner HashMaps into Vec<RollingWindow>
-        let mut result_map: HashMap<String, Vec<RollingWindow>> = HashMap::new();
-        for (continuous_ticker, inner_map) in raw_map {
-            result_map.insert(continuous_ticker, inner_map.into_values().collect());
+        for obj in objs {
+            // Use the continuous_ticker as the key
+            result_map
+                .entry(obj.continuous_ticker.clone())
+                .or_insert_with(Vec::new)
+                .push(obj);
         }
 
         // Sort each Vec<RollingWindow> by start_ts
@@ -404,6 +370,431 @@ mod test {
         Ok(())
     }
 
+    // -- Helper functions
+    async fn create_futures() -> anyhow::Result<Vec<i32>> {
+        //  Vendor data
+        let schema = dbn::Schema::from_str("mbp-1")?;
+        let dbn_dataset = dbn::Dataset::from_str("GLBX.MDP3")?;
+        let stype = dbn::SType::from_str("raw_symbol")?;
+        let vendor_data = VendorData::Databento(DatabentoData {
+            schema,
+            dataset: dbn_dataset,
+            stype,
+        });
+
+        // Create instrument
+        let dataset = Dataset::Futures;
+        let mut instruments = Vec::new();
+
+        // LEG4
+        instruments.push(Instrument::new(
+            None,
+            "HEG4",
+            "LeanHogs-0224",
+            dataset,
+            Vendors::Databento,
+            vendor_data.encode(),
+            1707937194000000000,
+            1704067200000000000,
+            1707937194000000000,
+            true,
+        ));
+
+        instruments.push(Instrument::new(
+            None,
+            "HEJ4",
+            "LeanHogs-0424",
+            dataset,
+            Vendors::Databento,
+            vendor_data.encode(),
+            1712941200000000000,
+            1704067200000000000,
+            1712941200000000000,
+            true,
+        ));
+
+        instruments.push(Instrument::new(
+            None,
+            "LEG4",
+            "LeanHogs-0224",
+            dataset,
+            Vendors::Databento,
+            vendor_data.encode(),
+            1707937194000000000,
+            1704067200000000000,
+            1707937194000000000,
+            true,
+        ));
+
+        instruments.push(Instrument::new(
+            None,
+            "LEJ4",
+            "LeanHogs-0424",
+            dataset,
+            Vendors::Databento,
+            vendor_data.encode(),
+            1712941200000000000,
+            1704067200000000000,
+            1713326400000000000,
+            true,
+        ));
+
+        let mut ids = Vec::new();
+        for i in instruments {
+            let id = create_instrument(i).await?;
+            ids.push(id);
+        }
+
+        Ok(ids)
+    }
+
+    async fn create_equities() -> anyhow::Result<Vec<i32>> {
+        //  Vendor data
+        let dataset = Dataset::Equities;
+        let schema = dbn::Schema::from_str("mbp-1")?;
+        let dbn_dataset = dbn::Dataset::from_str("XNAS.ITCH")?;
+        let stype = dbn::SType::from_str("raw_symbol")?;
+        let vendor_data = VendorData::Databento(DatabentoData {
+            schema,
+            dataset: dbn_dataset,
+            stype,
+        });
+
+        // Create instrument
+        let instruments = vec![
+            Instrument::new(
+                None,
+                "AAPL",
+                "aaple",
+                dataset.clone(),
+                Vendors::Databento,
+                vendor_data.encode(),
+                1704672000000000000,
+                1704672000000000000,
+                0,
+                true,
+            ),
+            Instrument::new(
+                None,
+                "TSLA",
+                "tesla",
+                dataset.clone(),
+                Vendors::Databento,
+                vendor_data.encode(),
+                1704672000000000000,
+                1704672000000000000,
+                0,
+                true,
+            ),
+        ];
+
+        let mut ids = Vec::new();
+        for i in instruments {
+            let id = create_instrument(i).await?;
+            ids.push(id);
+        }
+
+        Ok(ids)
+    }
+
+    async fn create_options() -> anyhow::Result<Vec<i32>> {
+        //  Vendor data
+        let dataset = Dataset::Option;
+        let schema = dbn::Schema::from_str("mbp-1")?;
+        let dbn_dataset = dbn::Dataset::from_str("OPRA.PILLAR")?;
+        let stype = dbn::SType::from_str("raw_symbol")?;
+        let vendor_data = VendorData::Databento(DatabentoData {
+            schema,
+            dataset: dbn_dataset,
+            stype,
+        });
+
+        let instruments = vec![Instrument::new(
+            None,
+            "APPLP12345",
+            "Apple Put",
+            dataset.clone(),
+            Vendors::Databento,
+            vendor_data.encode(),
+            1704672000000000000,
+            1704672000000000000,
+            0,
+            true,
+        )];
+
+        let mut ids = Vec::new();
+
+        for i in instruments {
+            let id = create_instrument(i).await?;
+            ids.push(id);
+        }
+
+        Ok(ids)
+    }
+
+    async fn create_option_records(ids: &Vec<i32>) -> anyhow::Result<Vec<Mbp1Msg>> {
+        let records = vec![
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[0] as u32, 1704209103644092564, 0) },
+                price: 6770,
+                size: 1,
+                action: Action::Trade as c_char,
+                side: Side::Bid as c_char,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1704209103644092564,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[0] as u32, 1704209103644092565, 0) },
+                price: 6870,
+                size: 2,
+                action: Action::Add as c_char,
+                side: Side::Bid as c_char,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1704209103644092565,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+        ];
+
+        // Create Records
+        dotenv::dotenv().ok();
+        let dataset = Dataset::Option;
+        let pool = init_db().await.unwrap();
+
+        let mut transaction = pool
+            .begin()
+            .await
+            .expect("Error setting up test transaction.");
+
+        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
+            .await
+            .expect("Error inserting records.");
+        let _ = transaction.commit().await;
+
+        Ok(records)
+    }
+    async fn create_equity_records(ids: &Vec<i32>) -> anyhow::Result<Vec<Mbp1Msg>> {
+        let records = vec![
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[0] as u32, 1704209103644092564, 0) },
+                price: 6770,
+                size: 1,
+                action: Action::Trade as c_char,
+                side: 2,
+                depth: 0,
+                flags: 10,
+                ts_recv: 1704209103644092564,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[1] as u32, 1704209103644092565, 0) },
+                price: 6870,
+                size: 2,
+                action: Action::Trade as c_char,
+                side: 1,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1704209103644092565,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+        ];
+
+        // Create Records
+        dotenv::dotenv().ok();
+        let dataset = Dataset::Equities;
+        let pool = init_db().await.unwrap();
+
+        let mut transaction = pool
+            .begin()
+            .await
+            .expect("Error setting up test transaction.");
+
+        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
+            .await
+            .expect("Error inserting records.");
+        let _ = transaction.commit().await;
+
+        Ok(records)
+    }
+
+    async fn create_future_records(ids: &Vec<i32>) -> anyhow::Result<Vec<Mbp1Msg>> {
+        let records = vec![
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[0] as u32, 1704209103644092562, 0) },
+                price: 500,
+                size: 1,
+                action: Action::Trade as c_char,
+                side: Side::Bid as c_char,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1704209103644092562,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[0] as u32, 1704240000000000001, 0) },
+                price: 500,
+                size: 1,
+                action: Action::Trade as c_char,
+                side: Side::Bid as c_char,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1704240000000000001,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[1] as u32, 1707117590000000000, 0) },
+                price: 6770,
+                size: 1,
+                action: Action::Trade as c_char,
+                side: 2,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1707117590000000000,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
+
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[2] as u32, 1704295503644092562, 0) },
+                price: 6870,
+                size: 2,
+                action: Action::Trade as c_char,
+                side: 2,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1704295503644092562,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
+
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[3] as u32, 1707117590000000000, 0) },
+                price: 6870,
+                size: 2,
+                action: Action::Trade as c_char,
+                side: 2,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1707117590000000000,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
+
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+        ];
+
+        // Create Records
+        dotenv::dotenv().ok();
+        let dataset = Dataset::Futures;
+        let pool = init_db().await.unwrap();
+
+        let mut transaction = pool
+            .begin()
+            .await
+            .expect("Error setting up test transaction.");
+
+        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
+            .await
+            .expect("Error inserting records.");
+        let _ = transaction.commit().await;
+
+        let query = "REFRESH MATERIALIZED VIEW futures_continuous_calendar_windows";
+        sqlx::query(query).execute(&pool).await?;
+
+        let query = "REFRESH MATERIALIZED VIEW futures_continuous_volume_windows";
+        sqlx::query(query).execute(&pool).await?;
+
+        Ok(records)
+    }
+
     async fn insert_records(
         tx: &mut Transaction<'_, Postgres>,
         records: Vec<Mbp1Msg>,
@@ -422,89 +813,8 @@ mod test {
     async fn test_retrieve_mbp1() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("XNAS.ITCH")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Equities;
-        let instrument = Instrument::new(
-            None,
-            "AAPL",
-            "Apple",
-            dataset.clone(),
-            Vendors::Databento,
-            vendor_data.encode(),
-            1704672000000000000,
-            1704672000000000000,
-            0,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Mock data
-        let records = vec![
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
-                price: 6770,
-                size: 1,
-                action: Action::Add as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
-                price: 6870,
-                size: 2,
-                action: Action::Add as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092565,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-        ];
-
-        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
-            .await
-            .expect("Error inserting records.");
-        let _ = transaction.commit().await;
+        let ids = create_equities().await?;
+        let _records = create_equity_records(&ids).await?;
 
         // Test
         let query_params = RetrieveParams {
@@ -512,7 +822,7 @@ mod test {
             start_ts: 1704209103644092563,
             end_ts: 1704209903644092567,
             schema: Schema::Mbp1,
-            dataset: dataset.clone(),
+            dataset: Dataset::Equities,
             stype: Stype::Raw,
         };
 
@@ -538,12 +848,12 @@ mod test {
             }
         }
 
-        assert_eq!(records.len(), query.len());
+        assert_eq!(1, query.len());
 
         // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }
@@ -554,89 +864,8 @@ mod test {
     async fn test_retrieve_tbbo() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("XNAS.ITCH")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Equities;
-        let instrument = Instrument::new(
-            None,
-            "AAPL",
-            "Apple",
-            dataset.clone(),
-            Vendors::Databento,
-            vendor_data.encode(),
-            1704672000000000000,
-            1704672000000000000,
-            0,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Mock data
-        let records = vec![
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
-                price: 6770,
-                size: 1,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
-                price: 6870,
-                size: 2,
-                action: Action::Add as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092565,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-        ];
-
-        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
-            .await
-            .expect("Error inserting records.");
-        let _ = transaction.commit().await;
+        let ids = create_equities().await?;
+        let _records = create_equity_records(&ids).await?;
 
         // Test
         let query_params = RetrieveParams {
@@ -644,7 +873,7 @@ mod test {
             start_ts: 1704209103644092563,
             end_ts: 1704209903644092567,
             schema: Schema::Tbbo,
-            dataset: dataset.clone(),
+            dataset: Dataset::Equities,
             stype: Stype::Raw,
         };
 
@@ -673,9 +902,9 @@ mod test {
         assert_eq!(query.len(), 1);
 
         // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }
@@ -686,89 +915,8 @@ mod test {
     async fn test_retrieve_trade() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("XNAS.ITCH")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Equities;
-        let instrument = Instrument::new(
-            None,
-            "AAPL",
-            "Apple",
-            dataset.clone(),
-            Vendors::Databento,
-            vendor_data.encode(),
-            1704672000000000000,
-            1704672000000000000,
-            0,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Mock data
-        let records = vec![
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
-                price: 6770,
-                size: 1,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
-                price: 6870,
-                size: 2,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092565,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-        ];
-
-        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
-            .await
-            .expect("Error inserting records.");
-        let _ = transaction.commit().await;
+        let ids = create_equities().await?;
+        let _records = create_equity_records(&ids).await?;
 
         // Test
         let query_params = RetrieveParams {
@@ -776,7 +924,7 @@ mod test {
             start_ts: 1704209103644092563,
             end_ts: 1704209903644092567,
             schema: Schema::Trades,
-            dataset,
+            dataset: Dataset::Equities,
             stype: Stype::Raw,
         };
 
@@ -802,12 +950,12 @@ mod test {
             }
         }
 
-        assert!(query.len() == 2);
+        assert!(query.len() == 1);
 
         // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }
@@ -818,89 +966,8 @@ mod test {
     async fn test_retrieve_bbo() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("XNAS.ITCH")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Equities;
-        let instrument = Instrument::new(
-            None,
-            "AAPL",
-            "Apple",
-            dataset.clone(),
-            Vendors::Databento,
-            vendor_data.encode(),
-            1704672000000000000,
-            1704672000000000000,
-            0,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Mock data
-        let records = vec![
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
-                price: 6770,
-                size: 1,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
-                price: 6870,
-                size: 2,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092565,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-        ];
-
-        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
-            .await
-            .expect("Error inserting records.");
-        let _ = transaction.commit().await;
+        let ids = create_equities().await?;
+        let _records = create_equity_records(&ids).await?;
 
         // Test
         let query_params = RetrieveParams {
@@ -908,7 +975,7 @@ mod test {
             start_ts: 1704209103644092563,
             end_ts: 1704209903644092567,
             schema: Schema::Bbo1S,
-            dataset,
+            dataset: Dataset::Equities,
             stype: Stype::Raw,
         };
 
@@ -933,12 +1000,13 @@ mod test {
                 }
             }
         }
-        assert!(query.len() > 0);
+
+        assert!(query.len() == 1);
 
         // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }
@@ -949,112 +1017,8 @@ mod test {
     async fn test_retrieve_ohlcv() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("XNAS.ITCH")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Equities;
-        let instrument = Instrument::new(
-            None,
-            "AAPL",
-            "Apple",
-            dataset.clone(),
-            Vendors::Databento,
-            vendor_data.encode(),
-            1704672000000000000,
-            1704672000000000000,
-            0,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Mock data
-        let records = vec![
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092562, 0) },
-                price: 500,
-                size: 1,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092562,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
-                price: 6770,
-                size: 1,
-                action: Action::Trade as c_char,
-                side: 2,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209104645092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562, 0) },
-                price: 6870,
-                size: 2,
-                action: Action::Trade as c_char,
-                side: 2,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704295503644092562,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-        ];
-
-        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
-            .await
-            .expect("Error inserting records.");
-        let _ = transaction.commit().await;
+        let ids = create_equities().await?;
+        let _records = create_equity_records(&ids).await?;
 
         // Test
         let query_params = RetrieveParams {
@@ -1062,7 +1026,7 @@ mod test {
             start_ts: 1704209103644092562,
             end_ts: 1704295503654092563,
             schema: Schema::Ohlcv1D,
-            dataset,
+            dataset: Dataset::Equities,
             stype: Stype::Raw,
         };
 
@@ -1089,12 +1053,14 @@ mod test {
         }
 
         // Validate
-        assert!(query.len() > 0);
+        assert_eq!(1, query.len());
 
         // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
+
+        assert!(query.len() > 0);
 
         Ok(())
     }
@@ -1106,97 +1072,16 @@ mod test {
     async fn test_retrieve_mbp1_futures() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("GLBX.MDP3")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Futures;
-        let instrument = Instrument::new(
-            None,
-            "HEJ4",
-            "Lean hogs",
-            dataset.clone(),
-            Vendors::Databento,
-            vendor_data.encode(),
-            1704672000000000000,
-            1704672000000000000,
-            0,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Mock data
-        let records = vec![
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
-                price: 6770,
-                size: 1,
-                action: Action::Add as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
-                price: 6870,
-                size: 2,
-                action: Action::Add as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092565,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-        ];
-
-        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
-            .await
-            .expect("Error inserting records.");
-        let _ = transaction.commit().await;
+        let ids = create_futures().await?;
+        let _records = create_future_records(&ids).await?;
 
         // Test
         let query_params = RetrieveParams {
-            symbols: vec!["HEJ4".to_string()],
-            start_ts: 1704209103644092563,
-            end_ts: 1704209903644092567,
+            symbols: vec!["HEG4".to_string()],
+            start_ts: 1704171600000000000,
+            end_ts: 1704225600000000000,
             schema: Schema::Mbp1,
-            dataset: dataset.clone(),
+            dataset: Dataset::Futures,
             stype: Stype::Raw,
         };
 
@@ -1221,12 +1106,12 @@ mod test {
                 }
             }
         }
-        assert_eq!(records.len(), query.len());
+        assert_eq!(query.len(), 1);
 
         // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }
@@ -1237,97 +1122,16 @@ mod test {
     async fn test_retrieve_tbbo_futures() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("GLBX.MDP3")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Futures;
-        let instrument = Instrument::new(
-            None,
-            "HEJ4",
-            "Lean hogs",
-            dataset.clone(),
-            Vendors::Databento,
-            vendor_data.encode(),
-            1704672000000000000,
-            1704672000000000000,
-            0,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Mock data
-        let records = vec![
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
-                price: 6770,
-                size: 1,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
-                price: 6870,
-                size: 2,
-                action: Action::Add as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092565,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-        ];
-
-        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
-            .await
-            .expect("Error inserting records.");
-        let _ = transaction.commit().await;
+        let ids = create_futures().await?;
+        let _records = create_future_records(&ids).await?;
 
         // Test
         let query_params = RetrieveParams {
-            symbols: vec!["HEJ4".to_string()],
-            start_ts: 1704209103644092563,
-            end_ts: 1704209903644092567,
+            symbols: vec!["HEG4".to_string()],
+            start_ts: 1704171600000000000,
+            end_ts: 1704225600000000000,
             schema: Schema::Tbbo,
-            dataset: dataset.clone(),
+            dataset: Dataset::Futures,
             stype: Stype::Raw,
         };
 
@@ -1355,9 +1159,9 @@ mod test {
         assert_eq!(query.len(), 1);
 
         // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }
@@ -1368,97 +1172,16 @@ mod test {
     async fn test_retrieve_trade_futures() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("GLBX.MDP3")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Futures;
-        let instrument = Instrument::new(
-            None,
-            "HEJ4",
-            "Lean hogs",
-            dataset.clone(),
-            Vendors::Databento,
-            vendor_data.encode(),
-            1704672000000000000,
-            1704672000000000000,
-            0,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Mock data
-        let records = vec![
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
-                price: 6770,
-                size: 1,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
-                price: 6870,
-                size: 2,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092565,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-        ];
-
-        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
-            .await
-            .expect("Error inserting records.");
-        let _ = transaction.commit().await;
+        let ids = create_futures().await?;
+        let _records = create_future_records(&ids).await?;
 
         // Test
         let query_params = RetrieveParams {
-            symbols: vec!["HEJ4".to_string()],
-            start_ts: 1704209103644092563,
-            end_ts: 1704209903644092567,
+            symbols: vec!["HEG4".to_string()],
+            start_ts: 1704171600000000000,
+            end_ts: 1704225600000000000,
             schema: Schema::Trades,
-            dataset,
+            dataset: Dataset::Futures,
             stype: Stype::Raw,
         };
 
@@ -1483,12 +1206,12 @@ mod test {
                 }
             }
         }
-        assert!(query.len() == 2);
+        assert!(query.len() == 1);
 
         // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }
@@ -1499,97 +1222,16 @@ mod test {
     async fn test_retrieve_bbo_futures() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("GLBX.MDP3")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Futures;
-        let instrument = Instrument::new(
-            None,
-            "HEJ4",
-            "Lean hogs",
-            dataset.clone(),
-            Vendors::Databento,
-            vendor_data.encode(),
-            1704672000000000000,
-            1704672000000000000,
-            0,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Mock data
-        let records = vec![
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
-                price: 6770,
-                size: 1,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
-                price: 6870,
-                size: 2,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092565,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-        ];
-
-        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
-            .await
-            .expect("Error inserting records.");
-        let _ = transaction.commit().await;
+        let ids = create_futures().await?;
+        let _records = create_future_records(&ids).await?;
 
         // Test
         let query_params = RetrieveParams {
-            symbols: vec!["HEJ4".to_string()],
-            start_ts: 1704209103644092563,
-            end_ts: 1704209903644092567,
+            symbols: vec!["HEG4".to_string()],
+            start_ts: 1704171600000000000,
+            end_ts: 1704225600000000000,
             schema: Schema::Bbo1S,
-            dataset,
+            dataset: Dataset::Futures,
             stype: Stype::Raw,
         };
 
@@ -1617,9 +1259,9 @@ mod test {
         assert!(query.len() > 0);
 
         // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }
@@ -1630,120 +1272,16 @@ mod test {
     async fn test_retrieve_ohlcv_futures() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("GLBX.MDP3")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Futures;
-        let instrument = Instrument::new(
-            None,
-            "HEJ4",
-            "Lean hogs",
-            dataset.clone(),
-            Vendors::Databento,
-            vendor_data.encode(),
-            1704672000000000000,
-            1704672000000000000,
-            0,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Mock data
-        let records = vec![
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092562, 0) },
-                price: 500,
-                size: 1,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092562,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
-                price: 6770,
-                size: 1,
-                action: Action::Trade as c_char,
-                side: 2,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209104645092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562, 0) },
-                price: 6870,
-                size: 2,
-                action: Action::Trade as c_char,
-                side: 2,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704295503644092562,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-        ];
-
-        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
-            .await
-            .expect("Error inserting records.");
-        let _ = transaction.commit().await;
+        let ids = create_futures().await?;
+        let _records = create_future_records(&ids).await?;
 
         // Test
         let query_params = RetrieveParams {
-            symbols: vec!["HEJ4".to_string()],
-            start_ts: 1704209103644092562,
-            end_ts: 1704295503654092563,
+            symbols: vec!["HEG4".to_string()],
+            start_ts: 1704171600000000000,
+            end_ts: 1704225600000000000,
             schema: Schema::Ohlcv1D,
-            dataset,
+            dataset: Dataset::Futures,
             stype: Stype::Raw,
         };
 
@@ -1772,9 +1310,9 @@ mod test {
         assert!(query.len() > 0);
 
         // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }
@@ -1786,89 +1324,8 @@ mod test {
     async fn test_retrieve_mbp1_option() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("OPRA.PILLAR")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Option;
-        let instrument = Instrument::new(
-            None,
-            "APPLP12345",
-            "Apple Put",
-            dataset.clone(),
-            Vendors::Databento,
-            vendor_data.encode(),
-            1704672000000000000,
-            1704672000000000000,
-            0,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Mock data
-        let records = vec![
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
-                price: 6770,
-                size: 1,
-                action: Action::Add as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
-                price: 6870,
-                size: 2,
-                action: Action::Add as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092565,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-        ];
-
-        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
-            .await
-            .expect("Error inserting records.");
-        let _ = transaction.commit().await;
+        let ids = create_options().await?;
+        let _records = create_option_records(&ids).await?;
 
         // Test
         let query_params = RetrieveParams {
@@ -1876,7 +1333,7 @@ mod test {
             start_ts: 1704209103644092563,
             end_ts: 1704209903644092567,
             schema: Schema::Mbp1,
-            dataset: dataset.clone(),
+            dataset: Dataset::Option,
             stype: Stype::Raw,
         };
 
@@ -1901,12 +1358,13 @@ mod test {
                 }
             }
         }
-        assert_eq!(records.len(), query.len());
+
+        assert_eq!(2, query.len());
 
         // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }
@@ -1917,89 +1375,8 @@ mod test {
     async fn test_retrieve_tbbo_option() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("OPRA.PILLAR")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Option;
-        let instrument = Instrument::new(
-            None,
-            "APPLP12345",
-            "Apple Put",
-            dataset.clone(),
-            Vendors::Databento,
-            vendor_data.encode(),
-            1704672000000000000,
-            1704672000000000000,
-            0,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Mock data
-        let records = vec![
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
-                price: 6770,
-                size: 1,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
-                price: 6870,
-                size: 2,
-                action: Action::Add as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092565,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-        ];
-
-        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
-            .await
-            .expect("Error inserting records.");
-        let _ = transaction.commit().await;
+        let ids = create_options().await?;
+        let _records = create_option_records(&ids).await?;
 
         // Test
         let query_params = RetrieveParams {
@@ -2007,7 +1384,7 @@ mod test {
             start_ts: 1704209103644092563,
             end_ts: 1704209903644092567,
             schema: Schema::Tbbo,
-            dataset: dataset.clone(),
+            dataset: Dataset::Option,
             stype: Stype::Raw,
         };
 
@@ -2035,9 +1412,9 @@ mod test {
         assert_eq!(query.len(), 1);
 
         // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }
@@ -2048,89 +1425,8 @@ mod test {
     async fn test_retrieve_trade_option() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("OPRA.PILLAR")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Option;
-        let instrument = Instrument::new(
-            None,
-            "APPLP12345",
-            "Apple Put",
-            dataset.clone(),
-            Vendors::Databento,
-            vendor_data.encode(),
-            1704672000000000000,
-            1704672000000000000,
-            0,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Mock data
-        let records = vec![
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
-                price: 6770,
-                size: 1,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
-                price: 6870,
-                size: 2,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092565,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-        ];
-
-        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
-            .await
-            .expect("Error inserting records.");
-        let _ = transaction.commit().await;
+        let ids = create_options().await?;
+        let _records = create_option_records(&ids).await?;
 
         // Test
         let query_params = RetrieveParams {
@@ -2138,7 +1434,7 @@ mod test {
             start_ts: 1704209103644092563,
             end_ts: 1704209903644092567,
             schema: Schema::Trades,
-            dataset,
+            dataset: Dataset::Option,
             stype: Stype::Raw,
         };
 
@@ -2163,12 +1459,12 @@ mod test {
                 }
             }
         }
-        assert!(query.len() == 2);
+        assert!(query.len() == 1);
 
         // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }
@@ -2179,89 +1475,8 @@ mod test {
     async fn test_retrieve_bbo_option() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("OPRA.PILLAR")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Option;
-        let instrument = Instrument::new(
-            None,
-            "APPLP12345",
-            "Apple Put",
-            dataset.clone(),
-            Vendors::Databento,
-            vendor_data.encode(),
-            1704672000000000000,
-            1704672000000000000,
-            0,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Mock data
-        let records = vec![
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
-                price: 6770,
-                size: 1,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092565, 0) },
-                price: 6870,
-                size: 2,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092565,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-        ];
-
-        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
-            .await
-            .expect("Error inserting records.");
-        let _ = transaction.commit().await;
+        let ids = create_options().await?;
+        let _records = create_option_records(&ids).await?;
 
         // Test
         let query_params = RetrieveParams {
@@ -2269,7 +1484,7 @@ mod test {
             start_ts: 1704209103644092563,
             end_ts: 1704209903644092567,
             schema: Schema::Bbo1S,
-            dataset,
+            dataset: Dataset::Option,
             stype: Stype::Raw,
         };
 
@@ -2297,9 +1512,9 @@ mod test {
         assert!(query.len() > 0);
 
         // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }
@@ -2310,112 +1525,8 @@ mod test {
     async fn test_retrieve_ohlcv_option() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("OPRA.PILLAR")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Option;
-        let instrument = Instrument::new(
-            None,
-            "APPLP12345",
-            "Apple Put",
-            dataset.clone(),
-            Vendors::Databento,
-            vendor_data.encode(),
-            1704672000000000000,
-            1704672000000000000,
-            0,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let mut transaction = pool
-            .begin()
-            .await
-            .expect("Error setting up test transaction.");
-
-        // Mock data
-        let records = vec![
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092562, 0) },
-                price: 500,
-                size: 1,
-                action: Action::Trade as c_char,
-                side: Side::Bid as c_char,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209103644092562,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704209103644092564, 0) },
-                price: 6770,
-                size: 1,
-                action: Action::Trade as c_char,
-                side: 2,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704209104645092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-            Mbp1Msg {
-                hd: { RecordHeader::new::<Mbp1Msg>(instrument_id as u32, 1704295503644092562, 0) },
-                price: 6870,
-                size: 2,
-                action: Action::Trade as c_char,
-                side: 2,
-                depth: 0,
-                flags: 0,
-                ts_recv: 1704295503644092562,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            },
-        ];
-
-        let _ = insert_records(&mut transaction, records.clone(), dataset.clone())
-            .await
-            .expect("Error inserting records.");
-        let _ = transaction.commit().await;
+        let ids = create_options().await?;
+        let _records = create_option_records(&ids).await?;
 
         // Test
         let query_params = RetrieveParams {
@@ -2423,7 +1534,7 @@ mod test {
             start_ts: 1704209103644092562,
             end_ts: 1704295503654092563,
             schema: Schema::Ohlcv1D,
-            dataset,
+            dataset: Dataset::Option,
             stype: Stype::Raw,
         };
 
@@ -2453,9 +1564,9 @@ mod test {
         assert!(query.len() > 0);
 
         // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }
@@ -2463,97 +1574,19 @@ mod test {
     #[sqlx::test]
     #[serial]
     // #[ignore]
-    async fn test_retrieve_rolling_window() -> anyhow::Result<()> {
+    async fn test_retrieve_calendar_rolling_window() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("GLBX.MDP3")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Futures;
-        let instrument = Instrument::new(
-            None,
-            "HEJ4",
-            "LeanHogs-0424",
-            dataset,
-            Vendors::Databento,
-            vendor_data.encode(),
-            1712941200000000000,
-            1704067200000000000,
-            1712941200000000000,
-            true,
-        );
-
-        let dataset = Dataset::Futures;
-        let instrument2 = Instrument::new(
-            None,
-            "HEG4",
-            "LeanHogs-0224",
-            dataset,
-            Vendors::Databento,
-            vendor_data.encode(),
-            1707937194000000000,
-            1704067200000000000,
-            1707937194000000000,
-            true,
-        );
-
-        let instrument3 = Instrument::new(
-            None,
-            "LEJ4",
-            "LeanHogs-0424",
-            dataset,
-            Vendors::Databento,
-            vendor_data.encode(),
-            1712941200000000000,
-            1704067200000000000,
-            1712941200000000000,
-            true,
-        );
-
-        let dataset = Dataset::Futures;
-        let instrument4 = Instrument::new(
-            None,
-            "LEG4",
-            "LeanHogs-0224",
-            dataset,
-            Vendors::Databento,
-            vendor_data.encode(),
-            1707937194000000000,
-            1704067200000000000,
-            1707937194000000000,
-            true,
-        );
-
-        let instrument_id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let instrument_id2 = create_instrument(instrument2)
-            .await
-            .expect("Error creating instrument.");
-
-        let instrument_id3 = create_instrument(instrument3)
-            .await
-            .expect("Error creating instrument.");
-
-        let instrument_id4 = create_instrument(instrument4)
-            .await
-            .expect("Error creating instrument.");
+        let ids = create_futures().await?;
+        let _records = create_future_records(&ids).await?;
 
         // Test
         let query_params = RetrieveParams {
             symbols: vec!["HE.c.0".to_string(), "LE.c.0".to_string()],
-            start_ts: 1705258794000000000,
+            start_ts: 1704209103644092562,
             end_ts: 1713117594000000000,
             schema: Schema::Mbp1,
-            dataset: dataset.clone(),
+            dataset: Dataset::Futures,
             stype: Stype::Continuous,
         };
 
@@ -2568,26 +1601,117 @@ mod test {
         .await
         .expect("Error on retrieve records.");
 
-        //Validate
-        assert!(vec["HE.c.0"].len() == 2);
-        assert!(vec["LE.c.0"].len() == 2);
+        //HE Validation
+        let timestamp: i64 = 1707937194000000000;
+        let nanos_per_day: i64 = 86_400_000_000_000;
+        let start_of_day = (timestamp / nanos_per_day) * nanos_per_day;
+        let end_of_day = start_of_day + nanos_per_day - 1;
+
+        let first_hog = vec["HE.c.0"][1].clone();
+        assert_eq!(first_hog.ticker, "HEG4");
+        assert_eq!(first_hog.start_time, 1704209103644092562); // start of requested range
+        assert_eq!(first_hog.end_time, end_of_day); //  eod on expiration date
+
+        let second_hog = vec["HE.c.0"][0].clone();
+        let beg_end_day = (1712941200000000000 / nanos_per_day) * nanos_per_day;
+        let end_end_day = beg_end_day + nanos_per_day - 1;
+        assert_eq!(second_hog.ticker, "HEJ4");
+        assert_eq!(second_hog.start_time, end_of_day + 1); // start of requested range
+        assert_eq!(second_hog.end_time, end_end_day); // end of requested b/c before expiration date
+
+        // LE Validation
+        let start_of_day = (1707937194000000000 / nanos_per_day) * nanos_per_day;
+        let end_of_day = start_of_day + nanos_per_day - 1;
+
+        let first_cattle = vec["LE.c.0"][1].clone();
+        assert_eq!(first_cattle.ticker, "LEG4");
+        assert_eq!(first_cattle.start_time, 1704209103644092562); // start range
+        assert_eq!(first_cattle.end_time, end_of_day);
+
+        let second_cattle = vec["LE.c.0"][0].clone();
+        assert_eq!(second_cattle.ticker, "LEJ4");
+        assert_eq!(second_cattle.start_time, end_of_day + 1); // start of day after exp
+        assert_eq!(second_cattle.end_time, 1713117594000000000 - 1); // end of range
 
         // Cleanup
-        delete_instrument(instrument_id)
-            .await
-            .expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
-        delete_instrument(instrument_id2)
-            .await
-            .expect("Error on delete");
+        Ok(())
+    }
 
-        delete_instrument(instrument_id3)
-            .await
-            .expect("Error on delete");
+    #[sqlx::test]
+    #[serial]
+    // #[ignore]
+    async fn test_retrieve_volume_rolling_window() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+        let ids = create_futures().await?;
+        let _records = create_future_records(&ids).await?;
 
-        delete_instrument(instrument_id4)
-            .await
-            .expect("Error on delete");
+        // Test
+        let query_params = RetrieveParams {
+            symbols: vec!["HE.v.0".to_string(), "LE.v.0".to_string()],
+            start_ts: 1704209103644092562,
+            end_ts: 1713117594000000000,
+            schema: Schema::Mbp1,
+            dataset: Dataset::Futures,
+            stype: Stype::Continuous,
+        };
+
+        let vec = RollingWindow::retrieve_continuous_window(
+            &pool,
+            query_params.start_ts,
+            query_params.end_ts,
+            0,
+            vec!["HE%".to_string(), "LE%".to_string()],
+            &ContinuousKind::Volume,
+        )
+        .await
+        .expect("Error on retrieve records.");
+
+        //Validate (they are in reverse order for easy pop off)
+        let nanos_per_day: i64 = 86_400_000_000_000;
+        let first_hog = vec["HE.v.0"][1].clone();
+        assert_eq!(first_hog.ticker, "HEG4");
+
+        let start_of_day = (1704209103644092562 / nanos_per_day) * nanos_per_day;
+        let end_of_day = start_of_day + nanos_per_day;
+        assert_eq!(first_hog.start_time, end_of_day); // start of day after highest volume
+
+        let start_of_day = (1707117590000000000 / nanos_per_day) * nanos_per_day;
+        let end_of_day = start_of_day + nanos_per_day - 1;
+        assert_eq!(first_hog.end_time, end_of_day); // end of day after passed as highest volume
+
+        let second_hog = vec["HE.v.0"][0].clone();
+        assert_eq!(second_hog.ticker, "HEJ4");
+        assert_eq!(second_hog.start_time, end_of_day + 1);
+        let start_of_day = (1712941200000000000 / nanos_per_day) * nanos_per_day;
+        let end_of_day = start_of_day + nanos_per_day - 1;
+        assert_eq!(second_hog.end_time, end_of_day); // end of day expires, since range end greater
+
+        // LE validation
+        let first_cattle = vec["LE.v.0"][1].clone();
+        assert_eq!(first_cattle.ticker, "LEG4");
+
+        let start_of_day = (1704295503644092562 / nanos_per_day) * nanos_per_day;
+        let end_of_day = start_of_day + nanos_per_day;
+        assert_eq!(first_cattle.start_time, end_of_day); // start of day after day with volume
+
+        let start_of_day = (1707117590000000000 / nanos_per_day) * nanos_per_day;
+        let end_of_day = start_of_day + nanos_per_day - 1;
+        assert_eq!(first_cattle.end_time, end_of_day);
+
+        let second_cattle = vec["LE.v.0"][0].clone();
+        assert_eq!(second_cattle.ticker, "LEJ4");
+        assert_eq!(second_cattle.start_time, end_of_day + 1);
+        assert_eq!(second_cattle.end_time, 1713117594000000000 - 1); // end of range
+
+        // Cleanup
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }

@@ -48,8 +48,6 @@ system() {
 
 	export RAW_DIR=./data
 	export PROCESSED_DIR=../data/processed_data
-	# docker compose -f docker-compose.dev.yml build --no-cache # Force rebuild
-	# docker compose -f docker-compose.dev.yml up -d            # Start the containers
 
 	docker compose -f docker-compose.dev.yml up --build -d
 
@@ -61,7 +59,7 @@ system() {
 	cargo test -p tests -- --nocapture
 
 	echo "Tearing down containers ..."
-	docker compose -f docker-compose.dev.yml down --volumes # Ensure volumes are removed
+
 	docker compose -f docker-compose.dev.yml down
 }
 
