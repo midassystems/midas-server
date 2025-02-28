@@ -422,20 +422,20 @@ mod test {
     use axum::{Extension, Json};
     use dotenv;
     use futures::stream::StreamExt;
-    // use hyper::body::HttpBody as _;
     use mbinary::decode::{Decoder, MetadataDecoder};
     use mbinary::encode::CombinedEncoder;
-    use mbinary::enums::Dataset;
-    use mbinary::enums::{Schema, Stype};
+    use mbinary::enums::Schema;
+    use mbinary::enums::{Action, Dataset, Side, Stype};
     use mbinary::metadata::Metadata;
     use mbinary::record_ref::RecordRef;
-    use mbinary::records::{BidAskPair, Mbp1Msg};
+    use mbinary::records::{BidAskPair, Mbp1Msg, RecordHeader};
     use mbinary::symbols::Instrument;
     use mbinary::vendors::Vendors;
     use mbinary::vendors::{DatabentoData, VendorData};
     use serial_test::serial;
     use sqlx::postgres::PgPoolOptions;
-    use std::str::FromStr; // Needed to pin the stream
+    use std::os::raw::c_char;
+    use std::str::FromStr;
 
     // -- Helper functions
     async fn create_instrument(instrument: Instrument) -> Result<i32> {
@@ -521,44 +521,28 @@ mod test {
 
         // Create instrument
         let dataset = Dataset::Futures;
-        let vendor = Vendors::Databento;
         let mut instruments = Vec::new();
 
         // LEG4
         instruments.push(Instrument::new(
             None,
-            "LEG4",
-            "LiveCattle-0224",
-            dataset,
-            vendor,
-            vendor_data.encode(),
-            1709229600000000000,
-            1704067200000000000,
-            1709229600000000000,
-            true,
-        ));
-
-        // HEG4
-        instruments.push(Instrument::new(
-            None,
             "HEG4",
             "LeanHogs-0224",
             dataset,
-            vendor,
+            Vendors::Databento,
             vendor_data.encode(),
-            1707933600000000000,
+            1707937194000000000,
             1704067200000000000,
-            1707933600000000000,
+            1707937194000000000,
             true,
         ));
 
-        // HEJ4
         instruments.push(Instrument::new(
             None,
             "HEJ4",
             "LeanHogs-0424",
             dataset,
-            vendor,
+            Vendors::Databento,
             vendor_data.encode(),
             1712941200000000000,
             1704067200000000000,
@@ -566,59 +550,29 @@ mod test {
             true,
         ));
 
-        // LEJ4
+        instruments.push(Instrument::new(
+            None,
+            "LEG4",
+            "LeanHogs-0224",
+            dataset,
+            Vendors::Databento,
+            vendor_data.encode(),
+            1707937194000000000,
+            1704067200000000000,
+            1707937194000000000,
+            true,
+        ));
+
         instruments.push(Instrument::new(
             None,
             "LEJ4",
-            "LiveCattle-0424",
+            "LeanHogs-0424",
             dataset,
-            vendor,
+            Vendors::Databento,
             vendor_data.encode(),
-            1714496400000000000,
+            1712941200000000000,
             1704067200000000000,
-            1714496400000000000,
-            true,
-        ));
-
-        // HEK4
-        instruments.push(Instrument::new(
-            None,
-            "HEK4",
-            "LeanHogs-0524",
-            dataset,
-            vendor,
-            vendor_data.encode(),
-            1715706000000000000,
-            1704067200000000000,
-            1715706000000000000,
-            true,
-        ));
-
-        // HEM4
-        instruments.push(Instrument::new(
-            None,
-            "HEM4",
-            "LeanHogs-0624",
-            dataset,
-            vendor,
-            vendor_data.encode(),
-            1718384400000000000,
-            1704067200000000000,
-            1718384400000000000,
-            true,
-        ));
-
-        // LEM4
-        instruments.push(Instrument::new(
-            None,
-            "LEM4",
-            "LiveCattle-0624",
-            dataset,
-            vendor,
-            vendor_data.encode(),
-            1719594000000000000,
-            1704067200000000000,
-            1719594000000000000,
+            1713326400000000000,
             true,
         ));
 
@@ -631,114 +585,171 @@ mod test {
         Ok(ids)
     }
 
-    #[sqlx::test]
-    #[serial]
-    // #[ignore]
-    async fn test_query_task_symbols_map_raw() -> anyhow::Result<()> {
-        dotenv::dotenv().ok();
-        let pool = init_db().await.unwrap();
-        let ids = create_futures().await?;
+    async fn create_future_records(ids: &Vec<i32>) -> anyhow::Result<Vec<Mbp1Msg>> {
+        let records = vec![
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[0] as u32, 1704209103644092562, 0) },
+                price: 500,
+                size: 1,
+                action: Action::Trade as c_char,
+                side: Side::Bid as c_char,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1704209103644092562,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[0] as u32, 1704240000000000001, 0) },
+                price: 500,
+                size: 1,
+                action: Action::Trade as c_char,
+                side: Side::Bid as c_char,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1704240000000000001,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[1] as u32, 1707117590000000000, 0) },
+                price: 6770,
+                size: 1,
+                action: Action::Trade as c_char,
+                side: 2,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1707117590000000000,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
 
-        let tickers = vec![
-            "HEJ4".to_string(),
-            "LEJ4".to_string(),
-            "HEG4".to_string(),
-            "LEG4".to_string(),
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[2] as u32, 1704295503644092562, 0) },
+                price: 6870,
+                size: 2,
+                action: Action::Trade as c_char,
+                side: 2,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1704295503644092562,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
+
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[3] as u32, 1707117590000000000, 0) },
+                price: 6870,
+                size: 2,
+                action: Action::Trade as c_char,
+                side: 2,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1707117590000000000,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
+
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
         ];
 
-        let params = RetrieveParams {
-            symbols: tickers.clone(),
-            start_ts: 1704085200000000000,
-            end_ts: 1714536000000000000,
-            schema: Schema::Mbp1,
-            dataset: Dataset::Futures,
-            stype: Stype::Raw,
-        };
+        let metadata = Metadata::new(
+            Schema::Mbp1,
+            Dataset::Futures,
+            1704295503644092562,
+            1707117590000000000,
+            SymbolMap::new(),
+        );
 
-        // Test
-        let heap = Arc::new(Mutex::new(MinHeap::new()));
-        let queried_flag = Arc::new(Mutex::new(false));
+        let mut buffer = Vec::new();
+        let mut encoder = CombinedEncoder::new(&mut buffer);
+        encoder.encode_metadata(&metadata)?;
 
-        let task = QueryTask::new(
-            "raw".to_string(),
-            0,
-            params,
-            tickers,
-            0,
-            ContinuousKind::None,
-            pool,
-            heap,
-            queried_flag,
-        )
-        .await?;
-
-        // Validate
-        assert!(task.symbol_map.map.keys().len() == 4);
-
-        // Cleanup
-        for id in ids {
-            delete_instrument(id).await.expect("Error on delete");
+        for r in &records {
+            encoder
+                .encode_record(&RecordRef::from(r))
+                .expect("Encoding failed");
         }
 
-        Ok(())
-    }
-
-    #[sqlx::test]
-    #[serial]
-    async fn test_query_task_symbols_map_continuous() -> anyhow::Result<()> {
-        dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-        let ids = create_futures().await?;
+        let response = create_record(Extension(pool.clone()), Json(buffer))
+            .await
+            .expect("Error creating records.")
+            .into_response();
 
-        let tickers = vec!["HE".to_string(), "LE".to_string()];
+        let mut stream = response.into_body().into_data_stream();
 
-        let params = RetrieveParams {
-            symbols: tickers.clone(),
-            start_ts: 1704085200000000000,
-            end_ts: 1714536000000000000,
-            schema: Schema::Mbp1,
-            dataset: Dataset::Futures,
-            stype: Stype::Continuous,
-        };
+        // Collect streamed responses
+        while let Some(chunk) = stream.next().await {
+            match chunk {
+                Ok(bytes) => {
+                    let bytes_str = String::from_utf8_lossy(&bytes);
 
-        // Test
-        let heap = Arc::new(Mutex::new(MinHeap::new()));
-        let queried_flag = Arc::new(Mutex::new(false));
-
-        let task = QueryTask::new(
-            "c.0".to_string(),
-            1_00,
-            params.clone(),
-            tickers.clone(),
-            0,
-            ContinuousKind::Calendar,
-            pool.clone(),
-            Arc::clone(&heap),
-            Arc::clone(&queried_flag),
-        )
-        .await?;
-        let _task2 = QueryTask::new(
-            "c.1".to_string(),
-            1_100,
-            params,
-            tickers,
-            1,
-            ContinuousKind::Calendar,
-            pool.clone(),
-            Arc::clone(&heap),
-            Arc::clone(&queried_flag),
-        )
-        .await?;
-
-        // Validate
-        assert!(task.symbol_map.map.keys().len() == 2);
-
-        // Cleanup
-        for id in ids {
-            delete_instrument(id).await.expect("Error on delete");
+                    match serde_json::from_str::<ApiResponse<String>>(&bytes_str) {
+                        Ok(response) => if response.status == "success" {},
+                        Err(e) => {
+                            eprintln!("Failed to parse chunk: {:?}, raw chunk: {}", e, bytes_str);
+                        }
+                    }
+                }
+                Err(e) => {
+                    panic!("Error while reading chunk: {:?}", e);
+                }
+            }
         }
 
-        Ok(())
+        // Populare materialized views
+        let query = "REFRESH MATERIALIZED VIEW futures_continuous_calendar_windows";
+        sqlx::query(query).execute(&pool).await?;
+
+        let query = "REFRESH MATERIALIZED VIEW futures_continuous_volume_windows";
+        sqlx::query(query).execute(&pool).await?;
+
+        Ok(records)
     }
 
     #[sqlx::test]
@@ -809,8 +820,8 @@ mod test {
     async fn test_record_getter_process_metadata_continuous() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
         let ids = create_futures().await?;
+        let _records = create_future_records(&ids).await?;
 
         // Test
         let params = RetrieveParams {
@@ -848,8 +859,8 @@ mod test {
     async fn test_record_getter_process_metadata_raw() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
         let ids = create_futures().await?;
+        let _records = create_future_records(&ids).await?;
 
         // Test
         let params = RetrieveParams {
@@ -887,89 +898,13 @@ mod test {
     async fn test_stream_records_raw() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
         let ids = create_futures().await?;
-
-        // Records
-        let mut records = Vec::new();
-        for id in &ids {
-            records.push(mbinary::records::Mbp1Msg {
-                hd: {
-                    mbinary::records::RecordHeader::new::<Mbp1Msg>(
-                        *id as u32,
-                        1704209103644092564,
-                        0,
-                    )
-                },
-                price: 6770,
-                size: 1,
-                action: 1,
-                side: 2,
-                depth: 0,
-                flags: 10,
-                ts_recv: 1704209103644092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            });
-        }
-
-        let metadata = Metadata::new(
-            Schema::Mbp1,
-            Dataset::Futures,
-            1704209103644092563,
-            1704209103644092566,
-            SymbolMap::new(),
-        );
-
-        let mut buffer = Vec::new();
-        let mut encoder = CombinedEncoder::new(&mut buffer);
-        encoder.encode_metadata(&metadata)?;
-
-        for r in records {
-            encoder
-                .encode_record(&RecordRef::from(&r))
-                .expect("Encoding failed");
-        }
-
-        let response = create_record(Extension(pool.clone()), Json(buffer))
-            .await
-            .expect("Error creating records.")
-            .into_response();
-
-        let mut stream = response.into_body().into_data_stream();
-
-        // Collect streamed responses
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(bytes) => {
-                    let bytes_str = String::from_utf8_lossy(&bytes);
-
-                    match serde_json::from_str::<ApiResponse<String>>(&bytes_str) {
-                        Ok(response) => if response.status == "success" {},
-                        Err(e) => {
-                            eprintln!("Failed to parse chunk: {:?}, raw chunk: {}", e, bytes_str);
-                        }
-                    }
-                }
-                Err(e) => {
-                    panic!("Error while reading chunk: {:?}", e);
-                }
-            }
-        }
+        let _records = create_future_records(&ids).await?;
 
         // Test
         let params = RetrieveParams {
             symbols: vec!["HEG4".to_string(), "LEG4".to_string()],
-            start_ts: 1704209103644092563,
+            start_ts: 1704171600000000000,
             end_ts: 1704209903644092569,
             schema: Schema::Mbp1,
             dataset: Dataset::Futures,
@@ -1009,93 +944,66 @@ mod test {
     #[sqlx::test]
     #[serial]
     // #[ignore]
-    async fn test_stream_records_continuous() -> anyhow::Result<()> {
+    async fn test_stream_records_calendar_continuous() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-
         let ids = create_futures().await?;
-
-        // Records
-        let mut records = Vec::new();
-        for id in &ids {
-            records.push(mbinary::records::Mbp1Msg {
-                hd: {
-                    mbinary::records::RecordHeader::new::<Mbp1Msg>(
-                        *id as u32,
-                        1704209103644092564,
-                        0,
-                    )
-                },
-                price: 6770,
-                size: 1,
-                action: 1,
-                side: 2,
-                depth: 0,
-                flags: 10,
-                ts_recv: 1704209103644092564,
-                ts_in_delta: 17493,
-                sequence: 739763,
-                discriminator: 0,
-                levels: [BidAskPair {
-                    bid_px: 1,
-                    ask_px: 1,
-                    bid_sz: 1,
-                    ask_sz: 1,
-                    bid_ct: 10,
-                    ask_ct: 20,
-                }],
-            });
-        }
-
-        let metadata = Metadata::new(
-            Schema::Mbp1,
-            Dataset::Futures,
-            1704209103644092563,
-            1704209103644092566,
-            SymbolMap::new(),
-        );
-
-        let mut buffer = Vec::new();
-        let mut encoder = CombinedEncoder::new(&mut buffer);
-        encoder.encode_metadata(&metadata)?;
-
-        for r in records {
-            encoder
-                .encode_record(&RecordRef::from(&r))
-                .expect("Encoding failed");
-        }
-
-        let response = create_record(Extension(pool.clone()), Json(buffer))
-            .await
-            .expect("Error creating records.")
-            .into_response();
-
-        let mut stream = response.into_body().into_data_stream();
-
-        // Collect streamed responses
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(bytes) => {
-                    let bytes_str = String::from_utf8_lossy(&bytes);
-
-                    match serde_json::from_str::<ApiResponse<String>>(&bytes_str) {
-                        Ok(response) => if response.status == "success" {},
-                        Err(e) => {
-                            eprintln!("Failed to parse chunk: {:?}, raw chunk: {}", e, bytes_str);
-                        }
-                    }
-                }
-                Err(e) => {
-                    panic!("Error while reading chunk: {:?}", e);
-                }
-            }
-        }
+        let _records = create_future_records(&ids).await?;
 
         // Test
         let params = RetrieveParams {
             symbols: vec!["HE.c.0".to_string(), "LE.c.0".to_string()],
-            start_ts: 1704209103644092563,
+            start_ts: 1704171600000000000,
             end_ts: 1704209903644092569,
+            schema: Schema::Mbp1,
+            dataset: Dataset::Futures,
+            stype: Stype::Continuous,
+        };
+        let loader = Arc::new(RecordGetter::new(1000, params, pool.clone()).await?);
+        let mut progress_stream = loader.stream().await;
+
+        // Collect streamed response
+        let mut buffer = Vec::new();
+
+        while let Some(chunk) = progress_stream.next().await {
+            match chunk {
+                Ok(bytes) => {
+                    buffer.extend_from_slice(&bytes);
+                }
+                Err(e) => panic!("Error while reading chunk: {:?}", e),
+            }
+        }
+
+        // Validate
+        let cursor = Cursor::new(buffer);
+        let mut decoder = Decoder::new(cursor)?;
+        let decoded_metadata = decoder.metadata().unwrap();
+        let records = decoder.decode()?;
+        assert_eq!(2, decoded_metadata.mappings.map.len());
+        assert!(records.len() > 0);
+
+        // Cleanup
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[serial]
+    // #[ignore]
+    async fn test_stream_records_volume_continuous() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+        let ids = create_futures().await?;
+        let _records = create_future_records(&ids).await?;
+
+        // Test
+        let params = RetrieveParams {
+            symbols: vec!["HE.v.0".to_string(), "LE.v.0".to_string()],
+            start_ts: 1704240000000000000,
+            end_ts: 1704250000000000000,
             schema: Schema::Mbp1,
             dataset: Dataset::Futures,
             stype: Stype::Continuous,

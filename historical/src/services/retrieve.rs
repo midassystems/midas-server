@@ -42,24 +42,25 @@ mod test {
     use crate::services::load::create_record;
     use axum::response::IntoResponse;
     use axum::{Extension, Json};
+    use dotenv;
     use futures::stream::StreamExt;
     use mbinary::encode::CombinedEncoder;
-    use mbinary::enums::Dataset;
+    use mbinary::enums::{Action, Dataset, Side, Stype};
     use mbinary::metadata::Metadata;
-    use mbinary::record_enum::RecordEnum;
     use mbinary::record_ref::RecordRef;
     use mbinary::symbols::SymbolMap;
     use mbinary::vendors::Vendors;
     use mbinary::vendors::{DatabentoData, VendorData};
     use mbinary::{
         decode::Decoder,
-        enums::{Schema, Stype},
+        enums::Schema,
         records::{BidAskPair, Mbp1Msg, RecordHeader},
         symbols::Instrument,
     };
     use serial_test::serial;
     use sqlx::postgres::PgPoolOptions;
     use std::io::Cursor;
+    use std::os::raw::c_char;
     use std::str::FromStr;
 
     // -- Helper functions
@@ -133,16 +134,8 @@ mod test {
         Ok(())
     }
 
-    #[sqlx::test]
-    #[serial]
-    // #[ignore]
-    async fn test_get_record_continuous() -> anyhow::Result<()> {
-        dotenv::dotenv().ok();
-
-        let pool = init_db().await.unwrap();
-        let transaction = pool.begin().await.expect("Error settign up database.");
-
-        // Create instrument
+    async fn create_futures() -> anyhow::Result<Vec<i32>> {
+        //  Vendor data
         let schema = dbn::Schema::from_str("mbp-1")?;
         let dbn_dataset = dbn::Dataset::from_str("GLBX.MDP3")?;
         let stype = dbn::SType::from_str("raw_symbol")?;
@@ -152,265 +145,208 @@ mod test {
             stype,
         });
 
+        // Create instrument
         let dataset = Dataset::Futures;
-        let ticker = "PPJ4";
-        let name = "test";
-        let instrument = Instrument::new(
+        let mut instruments = Vec::new();
+
+        // LEG4
+        instruments.push(Instrument::new(
             None,
-            ticker,
-            name,
-            dataset.clone(),
+            "HEG4",
+            "LeanHogs-0224",
+            dataset,
             Vendors::Databento,
             vendor_data.encode(),
-            1676397660000000000,
-            1704085200000000000,
-            1707933660000000000,
+            1707937194000000000,
+            1704067200000000000,
+            1707937194000000000,
             true,
-        );
+        ));
 
-        let id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-        let _ = transaction.commit().await;
-
-        // Records
-        let mbp_1 = Mbp1Msg {
-            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1707930000000000001, 0) },
-            price: 6770,
-            size: 1,
-            action: 84,
-            side: 2,
-            depth: 0,
-            flags: 10,
-            ts_recv: 1707930000000000001,
-            ts_in_delta: 17493,
-            sequence: 739763,
-            discriminator: 0,
-            levels: [BidAskPair {
-                bid_px: 1,
-                ask_px: 1,
-                bid_sz: 1,
-                ask_sz: 1,
-                bid_ct: 10,
-                ask_ct: 20,
-            }],
-        };
-        let mbp_2 = Mbp1Msg {
-            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1707933650000000000, 0) },
-            price: 6870,
-            size: 2,
-            action: 84,
-            side: 1,
-            depth: 0,
-            flags: 0,
-            ts_recv: 1707933650000000000,
-            ts_in_delta: 17493,
-            sequence: 739763,
-            discriminator: 0,
-            levels: [BidAskPair {
-                bid_px: 1,
-                ask_px: 1,
-                bid_sz: 1,
-                ask_sz: 1,
-                bid_ct: 10,
-                ask_ct: 20,
-            }],
-        };
-
-        let record_ref1: RecordRef = (&mbp_1).into();
-        let record_ref2: RecordRef = (&mbp_2).into();
-
-        let metadata = Metadata::new(
-            Schema::Mbp1,
+        instruments.push(Instrument::new(
+            None,
+            "HEJ4",
+            "LeanHogs-0424",
             dataset,
-            1704209103644092564,
-            1704209103644092566,
-            SymbolMap::new(),
-        );
+            Vendors::Databento,
+            vendor_data.encode(),
+            1712941200000000000,
+            1704067200000000000,
+            1712941200000000000,
+            true,
+        ));
 
-        let mut buffer = Vec::new();
-        let mut encoder = CombinedEncoder::new(&mut buffer);
-        encoder.encode_metadata(&metadata)?;
-        encoder
-            .encode_records(&[record_ref1, record_ref2])
-            .expect("Encoding failed");
+        instruments.push(Instrument::new(
+            None,
+            "LEG4",
+            "LeanHogs-0224",
+            dataset,
+            Vendors::Databento,
+            vendor_data.encode(),
+            1707937194000000000,
+            1704067200000000000,
+            1707937194000000000,
+            true,
+        ));
 
-        let response = create_record(Extension(pool.clone()), Json(buffer))
-            .await
-            .expect("Error creating records.")
-            .into_response();
+        instruments.push(Instrument::new(
+            None,
+            "LEJ4",
+            "LeanHogs-0424",
+            dataset,
+            Vendors::Databento,
+            vendor_data.encode(),
+            1712941200000000000,
+            1704067200000000000,
+            1713326400000000000,
+            true,
+        ));
 
-        let mut stream = response.into_body().into_data_stream();
-
-        // Collect streamed responses
-        while let Some(chunk) = stream.next().await {
-            match chunk {
-                Ok(bytes) => {
-                    let bytes_str = String::from_utf8_lossy(&bytes);
-
-                    match serde_json::from_str::<ApiResponse<String>>(&bytes_str) {
-                        Ok(response) => {
-                            // println!("{:?}", response);
-                            if response.status == "success" {}
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to parse chunk: {:?}, raw chunk: {}", e, bytes_str);
-                        }
-                    }
-                }
-                Err(e) => {
-                    panic!("Error while reading chunk: {:?}", e);
-                }
-            }
+        let mut ids = Vec::new();
+        for i in instruments {
+            let id = create_instrument(i).await?;
+            ids.push(id);
         }
 
-        // Test
-        let params = RetrieveParams {
-            symbols: vec!["PP.c.0".to_string()],
-            start_ts: 1672549200000000000,
-            end_ts: 1747242000000000000,
-            schema: Schema::Mbp1,
-            dataset,
-            stype: Stype::Continuous,
-        };
-
-        let response = get_records(Extension(pool.clone()), Json(params))
-            .await
-            .into_response();
-
-        let mut body = response.into_body().into_data_stream();
-
-        // Collect streamed response
-        let mut buffer = Vec::new();
-        while let Some(chunk) = body.next().await {
-            match chunk {
-                Ok(bytes) => {
-                    // println!("{:?}", bytes);
-                    buffer.extend_from_slice(&bytes);
-                }
-                Err(e) => panic!("Error while reading chunk: {:?}", e),
-            }
-        }
-
-        let cursor = Cursor::new(buffer);
-        let mut decoder = Decoder::new(cursor)?;
-        let _decoded_metadata = decoder.metadata().unwrap();
-        let records = decoder.decode()?;
-
-        // Validate
-        assert!(!records.is_empty(), "Streamed data should not be empty");
-
-        // Cleanup
-        delete_instrument(id).await.expect("Error on delete");
-
-        Ok(())
+        Ok(ids)
     }
 
-    #[sqlx::test]
-    #[serial]
-    // #[ignore]
-    async fn test_get_records() -> anyhow::Result<()> {
-        dotenv::dotenv().ok();
-        let pool = init_db().await.unwrap();
-        let transaction = pool.begin().await.expect("Error settign up database.");
+    async fn create_future_records(ids: &Vec<i32>) -> anyhow::Result<Vec<Mbp1Msg>> {
+        let records = vec![
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[0] as u32, 1704209103644092562, 0) },
+                price: 500,
+                size: 1,
+                action: Action::Trade as c_char,
+                side: Side::Bid as c_char,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1704209103644092562,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[0] as u32, 1704240000000000001, 0) },
+                price: 500,
+                size: 1,
+                action: Action::Trade as c_char,
+                side: Side::Bid as c_char,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1704240000000000001,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[1] as u32, 1707117590000000000, 0) },
+                price: 6770,
+                size: 1,
+                action: Action::Trade as c_char,
+                side: 2,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1707117590000000000,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
 
-        // Create instrument
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("XNAS.ITCH")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[2] as u32, 1704295503644092562, 0) },
+                price: 6870,
+                size: 2,
+                action: Action::Trade as c_char,
+                side: 2,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1704295503644092562,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
 
-        let dataset = Dataset::Equities;
-        let ticker = "AAPL";
-        let name = "Apple Inc.";
-        let instrument = Instrument::new(
-            None,
-            ticker,
-            name,
-            dataset.clone(),
-            Vendors::Databento,
-            vendor_data.encode(),
-            1704672000000000000,
-            1704672000000000000,
-            0,
-            true,
-        );
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+            Mbp1Msg {
+                hd: { RecordHeader::new::<Mbp1Msg>(ids[3] as u32, 1707117590000000000, 0) },
+                price: 6870,
+                size: 2,
+                action: Action::Trade as c_char,
+                side: 2,
+                depth: 0,
+                flags: 0,
+                ts_recv: 1707117590000000000,
+                ts_in_delta: 17493,
+                sequence: 739763,
+                discriminator: 0,
 
-        let id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-        let _ = transaction.commit().await;
-
-        // Records
-        let mbp_1 = Mbp1Msg {
-            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092564, 0) },
-            price: 6770,
-            size: 1,
-            action: 1,
-            side: 2,
-            depth: 0,
-            flags: 10,
-            ts_recv: 1704209103644092564,
-            ts_in_delta: 17493,
-            sequence: 739763,
-            discriminator: 0,
-            levels: [BidAskPair {
-                bid_px: 1,
-                ask_px: 1,
-                bid_sz: 1,
-                ask_sz: 1,
-                bid_ct: 10,
-                ask_ct: 20,
-            }],
-        };
-        let mbp_2 = Mbp1Msg {
-            hd: { RecordHeader::new::<Mbp1Msg>(id as u32, 1704209103644092565, 0) },
-            price: 6870,
-            size: 2,
-            action: 1,
-            side: 1,
-            depth: 0,
-            flags: 0,
-            ts_recv: 1704209103644092565,
-            ts_in_delta: 17493,
-            sequence: 739763,
-            discriminator: 0,
-            levels: [BidAskPair {
-                bid_px: 1,
-                ask_px: 1,
-                bid_sz: 1,
-                ask_sz: 1,
-                bid_ct: 10,
-                ask_ct: 20,
-            }],
-        };
-
-        let record_ref1: RecordRef = (&mbp_1).into();
-        let record_ref2: RecordRef = (&mbp_2).into();
+                levels: [BidAskPair {
+                    bid_px: 1,
+                    ask_px: 1,
+                    bid_sz: 1,
+                    ask_sz: 1,
+                    bid_ct: 10,
+                    ask_ct: 20,
+                }],
+            },
+        ];
 
         let metadata = Metadata::new(
             Schema::Mbp1,
-            dataset,
-            1704209103644092564,
-            1704209103644092566,
+            Dataset::Futures,
+            1704295503644092562,
+            1707117590000000000,
             SymbolMap::new(),
         );
 
         let mut buffer = Vec::new();
         let mut encoder = CombinedEncoder::new(&mut buffer);
         encoder.encode_metadata(&metadata)?;
-        encoder
-            .encode_records(&[record_ref1, record_ref2])
-            .expect("Encoding failed");
 
+        for r in &records {
+            encoder
+                .encode_record(&RecordRef::from(r))
+                .expect("Encoding failed");
+        }
+
+        let pool = init_db().await.unwrap();
         let response = create_record(Extension(pool.clone()), Json(buffer))
             .await
             .expect("Error creating records.")
             .into_response();
+
         let mut stream = response.into_body().into_data_stream();
 
         // Collect streamed responses
@@ -432,13 +368,84 @@ mod test {
             }
         }
 
+        // Populare materialized views
+        let query = "REFRESH MATERIALIZED VIEW futures_continuous_calendar_windows";
+        sqlx::query(query).execute(&pool).await?;
+
+        let query = "REFRESH MATERIALIZED VIEW futures_continuous_volume_windows";
+        sqlx::query(query).execute(&pool).await?;
+
+        Ok(records)
+    }
+
+    #[sqlx::test]
+    #[serial]
+    // #[ignore]
+    async fn test_get_record_continuous() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+        let ids = create_futures().await?;
+        let _records = create_future_records(&ids).await?;
+
         // Test
         let params = RetrieveParams {
-            symbols: vec!["AAPL".to_string()],
-            start_ts: 1704209103644092563,
+            symbols: vec!["HE.c.0".to_string(), "LE.c.0".to_string()],
+            start_ts: 1704171600000000000,
             end_ts: 1704209903644092569,
             schema: Schema::Mbp1,
-            dataset,
+            dataset: Dataset::Futures,
+            stype: Stype::Continuous,
+        };
+
+        let response = get_records(Extension(pool.clone()), Json(params))
+            .await
+            .into_response();
+
+        let mut body = response.into_body().into_data_stream();
+
+        // Collect streamed response
+        let mut buffer = Vec::new();
+        while let Some(chunk) = body.next().await {
+            match chunk {
+                Ok(bytes) => {
+                    buffer.extend_from_slice(&bytes);
+                }
+                Err(e) => panic!("Error while reading chunk: {:?}", e),
+            }
+        }
+
+        let cursor = Cursor::new(buffer);
+        let mut decoder = Decoder::new(cursor)?;
+        let _decoded_metadata = decoder.metadata().unwrap();
+        let records = decoder.decode()?;
+
+        // Validate
+        assert!(!records.is_empty(), "Streamed data should not be empty");
+
+        // Cleanup
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    #[serial]
+    // #[ignore]
+    async fn test_get_records() -> anyhow::Result<()> {
+        dotenv::dotenv().ok();
+        let pool = init_db().await.unwrap();
+        let ids = create_futures().await?;
+        let _records = create_future_records(&ids).await?;
+
+        // Test
+        let params = RetrieveParams {
+            symbols: vec!["LEG4".to_string(), "HEG4".to_string()],
+            start_ts: 1704171600000000000,
+            end_ts: 1704225600000000000,
+            schema: Schema::Mbp1,
+            dataset: Dataset::Futures,
             stype: Stype::Raw,
         };
 
@@ -462,12 +469,12 @@ mod test {
         let records = decoder.decode()?; //.expect("Error decoding metadata.");
 
         // Validate
-        assert_eq!(RecordEnum::Mbp1(mbp_1), records[0]);
-        assert_eq!(RecordEnum::Mbp1(mbp_2), records[1]);
         assert!(!records.is_empty(), "Streamed data should not be empty");
 
         // Cleanup
-        delete_instrument(id).await.expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }
@@ -478,47 +485,15 @@ mod test {
     async fn test_get_record_no_records() -> anyhow::Result<()> {
         dotenv::dotenv().ok();
         let pool = init_db().await.unwrap();
-        let transaction = pool.begin().await.expect("Error settign up database.");
-
-        // Create instrument
-        let schema = dbn::Schema::from_str("mbp-1")?;
-        let dbn_dataset = dbn::Dataset::from_str("XNAS.ITCH")?;
-        let stype = dbn::SType::from_str("raw_symbol")?;
-        let vendor_data = VendorData::Databento(DatabentoData {
-            schema,
-            dataset: dbn_dataset,
-            stype,
-        });
-
-        let dataset = Dataset::Equities;
-        let ticker = "AAPL";
-        let name = "Apple Inc.";
-        let instrument = Instrument::new(
-            None,
-            ticker,
-            name,
-            dataset.clone(),
-            Vendors::Databento,
-            vendor_data.encode(),
-            1704672000000000000,
-            1704672000000000000,
-            0,
-            true,
-        );
-
-        let id = create_instrument(instrument)
-            .await
-            .expect("Error creating instrument.");
-
-        let _ = transaction.commit().await;
+        let ids = create_futures().await?;
 
         // Test
         let params = RetrieveParams {
-            symbols: vec!["AAPL".to_string()],
+            symbols: vec!["HEG4".to_string()],
             start_ts: 1704209103644092563,
             end_ts: 1704209903644092569,
             schema: Schema::Mbp1,
-            dataset,
+            dataset: Dataset::Futures,
             stype: Stype::Raw,
         };
 
@@ -543,12 +518,14 @@ mod test {
 
         // Validate
         let symbols_map = decoder.metadata.unwrap().mappings;
-        let instrument_id = symbols_map.map.get(&(id as u32)); //("AAPL");
-        assert_eq!(instrument_id.unwrap(), &"AAPL".to_string());
+        let instrument_id = symbols_map.map.get(&(ids[0] as u32)); //("AAPL");
+        assert_eq!(instrument_id.unwrap(), &"HEG4".to_string());
         assert!(records.len() == 0);
 
         // Cleanup
-        delete_instrument(id).await.expect("Error on delete");
+        for id in ids {
+            delete_instrument(id).await.expect("Error on delete");
+        }
 
         Ok(())
     }

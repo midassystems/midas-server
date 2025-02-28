@@ -97,7 +97,9 @@ pub async fn compare_dbn_raw_output(
     let mut mbinary_decoder = read_mbinary_file(mbinary_filepath).await?;
     let (mut dbn_decoder, _map) = read_dbn_file(dbn_filepath).await?;
 
-    println!("{:?}", mbinary_decoder.metadata());
+    // println!("{:?}", mbinary_decoder.metadata());
+    // println!("{:?}", dbn_decoder.metadata());
+
     // Output files
     let mbinary_output_file = "raw_mbinary_records.txt";
     let dbn_output_file = "raw_dbn_records.txt";
@@ -227,6 +229,7 @@ mod tests {
     use midas_client::instrument::Instruments;
     use midas_clilib::{self, cli::ProcessCommand};
     use serial_test::serial;
+    use sqlx::PgPool;
     use std::str::FromStr;
 
     async fn create_tickers() -> anyhow::Result<()> {
@@ -381,141 +384,6 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    #[serial]
-    // #[ignore]
-    async fn test_data_integrity_continuous_volume() -> anyhow::Result<()> {
-        let path_1 = PathBuf::from("data/databento/GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-01-17T00:00:00Z_2024-01-24T00:00:00Z.dbn") ;
-
-        dbn_raw_count(path_1).await?;
-
-        // Setup
-        create_tickers().await.expect("Error creating tickers");
-        // Parameters
-        let dataset = Dataset::Futures;
-        let context = midas_clilib::context::Context::init().expect("Error on context creation.");
-
-        // Mbp1
-        let upload_cmd = midas_clilib::cli::vendors::databento::DatabentoCommands::Upload {
-            dataset: dataset.as_str().to_string(),
-            dbn_filepath: "GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-01-17T00:00:00Z_2024-01-24T00:00:00Z.dbn".to_string(), 
-            dbn_downloadtype: "stream".to_string(),
-            midas_filepath: "system_tests_data.bin".to_string(),
-        };
-
-        upload_cmd
-            .process_command(&context)
-            .await
-            .expect("Error on upload.");
-
-        // Raw
-        test_raw_records_volume().await?;
-
-        // Continuous Calendar
-        test_continuous_volume().await?;
-
-        // Rolllover flag
-        test_rollover_volume().await?;
-
-        // Cleanup
-        teardown_tickers().await?;
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[serial]
-    // #[ignore]
-    async fn test_data_integrity_continuous_calendar() -> anyhow::Result<()> {
-        let path_1 = PathBuf::from("data/databento/GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-02-09T00:00:00Z_2024-02-17T00:00:00Z.dbn");
-
-        dbn_raw_count(path_1).await?;
-
-        // Setup
-        create_tickers().await.expect("Error creating tickers");
-
-        // Parameters
-        let dataset = Dataset::Futures;
-        let context = midas_clilib::context::Context::init().expect("Error on context creation.");
-
-        // Mbp1
-        let upload_cmd = midas_clilib::cli::vendors::databento::DatabentoCommands::Upload {
-            dataset: dataset.as_str().to_string(),
-            dbn_filepath: "GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-02-09T00:00:00Z_2024-02-17T00:00:00Z.dbn".to_string(),
-            dbn_downloadtype: "stream".to_string(),
-            midas_filepath: "system_tests_data2.bin".to_string(),
-        };
-
-        upload_cmd
-            .process_command(&context)
-            .await
-            .expect("Error on upload.");
-
-        // Raw
-        test_raw_records_calendar().await?;
-
-        // Continuous Volume
-        test_continuous_calendar().await?;
-
-        // Rolllover flag
-        test_rollover_calendar().await?;
-
-        // Cleanup
-        teardown_tickers().await?;
-
-        Ok(())
-    }
-
-    async fn pull_continuous_volume_files(schema: &Schema, file: String) -> anyhow::Result<()> {
-        dotenv().ok();
-
-        let base_url = "http://127.0.0.1:8080";
-        let client = Historical::new(&base_url);
-
-        let query_params = RetrieveParams::new(
-            vec![
-                "HE.v.0".to_string(),
-                "HE.v.1".to_string(),
-                "LE.v.0".to_string(),
-                "LE.v.1".to_string(),
-            ],
-            "2024-01-18 00:00:00",
-            "2024-01-24 00:00:00",
-            schema.clone(),
-            Dataset::Futures,
-            mbinary::enums::Stype::Continuous,
-        )?;
-
-        let _response = client.get_records_to_file(&query_params, &file).await?;
-
-        Ok(())
-    }
-
-    async fn pull_continuous_calendar_files(schema: &Schema, file: String) -> anyhow::Result<()> {
-        dotenv().ok();
-
-        let base_url = "http://127.0.0.1:8080";
-        let client = Historical::new(&base_url);
-
-        let query_params = RetrieveParams::new(
-            vec![
-                "HE.c.0".to_string(),
-                "HE.c.1".to_string(),
-                "LE.c.0".to_string(),
-                "LE.c.1".to_string(),
-            ],
-            "2024-02-13 00:00:00",
-            "2024-02-16 00:00:00",
-            schema.clone(),
-            Dataset::Futures,
-            mbinary::enums::Stype::Continuous,
-        )?;
-
-        let _response = client.get_records_to_file(&query_params, &file).await?;
-
-        Ok(())
-    }
-
     async fn pull_raw_files(
         schema: &Schema,
         file: String,
@@ -549,7 +417,80 @@ mod tests {
         Ok(())
     }
 
-    async fn test_continuous_volume() -> anyhow::Result<()> {
+    // Continuous Calendar
+    #[tokio::test]
+    #[serial]
+    // #[ignore]
+    async fn test_data_integrity_continuous_calendar() -> anyhow::Result<()> {
+        let path_1 = PathBuf::from("data/databento/GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-02-09T00:00:00Z_2024-02-17T00:00:00Z.dbn");
+        dbn_raw_count(path_1).await?;
+
+        // Parameters
+        let dataset = Dataset::Futures;
+        let context = midas_clilib::context::Context::init().expect("Error on context creation.");
+
+        // Seed Database
+        create_tickers().await.expect("Error creating tickers");
+        let upload_cmd = midas_clilib::cli::vendors::databento::DatabentoCommands::Upload {
+            dataset: dataset.as_str().to_string(),
+            dbn_filepath: "GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-02-09T00:00:00Z_2024-02-17T00:00:00Z.dbn".to_string(),
+            dbn_downloadtype: "stream".to_string(),
+            midas_filepath: "system_tests_data2.bin".to_string(),
+        };
+
+        upload_cmd
+            .process_command(&context)
+            .await
+            .expect("Error on upload.");
+
+        // Connection string for the PostgreSQL container
+        let database_url = "postgres://postgres:password@172.18.0.2:5432/market_data";
+        let pool = PgPool::connect(database_url)
+            .await
+            .expect("Failed to connect to the database");
+        let query = "REFRESH MATERIALIZED VIEW futures_continuous_calendar_windows;";
+        sqlx::query(query).execute(&pool).await?;
+
+        // Raw
+        test_raw_records_calendar().await?;
+
+        // Continuous Volume
+        test_continuous_calendar().await?;
+
+        // Rolllover flag
+        test_rollover_calendar().await?;
+
+        // Cleanup
+        teardown_tickers().await?;
+
+        Ok(())
+    }
+
+    async fn pull_continuous_calendar_files(
+        symbols: Vec<String>,
+        schema: &Schema,
+        file: String,
+    ) -> anyhow::Result<()> {
+        dotenv().ok();
+
+        let base_url = "http://127.0.0.1:8080";
+        let client = Historical::new(&base_url);
+
+        let query_params = RetrieveParams::new(
+            symbols,
+            "2024-02-13 00:00:00",
+            "2024-02-16 00:00:00",
+            schema.clone(),
+            Dataset::Futures,
+            mbinary::enums::Stype::Continuous,
+        )?;
+
+        let _response = client.get_records_to_file(&query_params, &file).await?;
+
+        Ok(())
+    }
+
+    async fn test_raw_records_calendar() -> anyhow::Result<()> {
         let schemas = vec![
             Schema::Mbp1,
             Schema::Tbbo,
@@ -562,20 +503,24 @@ mod tests {
             // Schema::Bbo1M,
         ];
 
-        println!("Testing Continuous Volume");
+        println!("Testing Raw Tickers: ");
         for schema in &schemas {
             println!("Schema : {:?}", schema);
 
             let mbinary_file = format!(
-                "data/HE.v.0_HE.v.1_LE.v.0_LE.v.1_{}.bin",
+                "data/HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_{}.bin",
                 schema.to_string()
             );
-            let _ = pull_continuous_volume_files(schema, mbinary_file.clone()).await?;
+
+            let start: &str = "2024-02-13 00:00:00";
+            let end: &str = "2024-02-17 00:00:00";
+
+            let _ = pull_raw_files(schema, mbinary_file.clone(), start, end).await?;
 
             let dbn_file = PathBuf::from(format!(
-                "data/databento/GLBX.MDP3_{}_HE.v.0_HE.v.1_LE.v.0_LE.v.1_2024-01-18T00:00:00Z_2024-01-24T00:00:00Z.dbn",
-                schema.to_string()
-            ));
+            "data/databento/GLBX.MDP3_{}_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-02-13T00:00:00Z_2024-02-17T00:00:00Z.dbn",
+            schema.to_string()
+        ));
 
             // Test
             compare_dbn_raw_output(dbn_file.clone(), &PathBuf::from(mbinary_file.clone())).await?;
@@ -605,14 +550,31 @@ mod tests {
         for schema in &schemas {
             println!("Schema : {:?}", schema);
 
-            let mbinary_file = format!(
-                "data/HE.c.0_HE.c.1_LE.c.0_LE.c.1_{}.bin",
-                schema.to_string()
-            );
-            let _ = pull_continuous_calendar_files(schema, mbinary_file.clone()).await?;
+            // Rank 0
+            let mbinary_file = format!("data/HE.c.0_LE.c.0_{}.bin", schema.to_string());
+            let tickers = vec!["HE.c.0".to_string(), "LE.c.0".to_string()];
+            let _ = pull_continuous_calendar_files(tickers, schema, mbinary_file.clone()).await?;
 
             let dbn_file = PathBuf::from(format!(
-                "data/databento/GLBX.MDP3_{}_HE.c.0_HE.c.1_LE.c.0_LE.c.1_2024-02-13T00:00:00Z_2024-02-16T00:00:00Z.dbn",
+                "data/databento/GLBX.MDP3_{}_HE.c.0_LE.c.0_2024-02-13T00:00:00Z_2024-02-16T00:00:00Z.dbn",
+                schema.to_string()
+            ));
+
+            // Test
+            compare_dbn_raw_output(dbn_file.clone(), &PathBuf::from(mbinary_file.clone())).await?;
+            let equal = compare_dbn(dbn_file, &PathBuf::from(mbinary_file.clone())).await?;
+            chronological_check(&PathBuf::from(mbinary_file)).await?;
+
+            assert!(equal);
+
+            // Rank 1
+            let mbinary_file = format!("data/HE.c.1_LE.c.1_{}.bin", schema.to_string());
+            let tickers = vec!["HE.c.1".to_string(), "LE.c.1".to_string()];
+
+            let _ = pull_continuous_calendar_files(tickers, schema, mbinary_file.clone()).await?;
+
+            let dbn_file = PathBuf::from(format!(
+                "data/databento/GLBX.MDP3_{}_HE.c.1_LE.c.1_2024-02-13T00:00:00Z_2024-02-16T00:00:00Z.dbn",
                 schema.to_string()
             ));
 
@@ -627,7 +589,7 @@ mod tests {
         Ok(())
     }
 
-    async fn test_raw_records_calendar() -> anyhow::Result<()> {
+    async fn test_rollover_calendar() -> anyhow::Result<()> {
         let schemas = vec![
             Schema::Mbp1,
             Schema::Tbbo,
@@ -640,24 +602,154 @@ mod tests {
             // Schema::Bbo1M,
         ];
 
-        println!("Testing Raw Tickers: ");
+        for schema in &schemas {
+            // Rank 0
+            let mbinary_file = format!("data/HE.c.0_LE.c.0_{}.bin", schema.to_string());
+            let mut decoder = AsyncDecoder::<BufReader<File>>::from_file(mbinary_file).await?;
+
+            // Write MBN records to file
+            let mut rollover_records = Vec::new();
+            while let Some(mbinary_record) = decoder.decode_ref().await? {
+                let record_enum = RecordEnum::from_ref(mbinary_record)?;
+                if record_enum.msg().header().rollover_flag == 1 {
+                    rollover_records.push(record_enum);
+                }
+            }
+            assert_eq!(rollover_records.len(), 1);
+
+            // Rank 1
+            let mbinary_file = format!("data/HE.c.1_LE.c.1_{}.bin", schema.to_string());
+            let mut decoder = AsyncDecoder::<BufReader<File>>::from_file(mbinary_file).await?;
+
+            // Write MBN records to file
+            let mut rollover_records = Vec::new();
+            while let Some(mbinary_record) = decoder.decode_ref().await? {
+                let record_enum = RecordEnum::from_ref(mbinary_record)?;
+                if record_enum.msg().header().rollover_flag == 1 {
+                    rollover_records.push(record_enum);
+                }
+            }
+            assert_eq!(rollover_records.len(), 1);
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[serial]
+    // #[ignore]
+    async fn test_data_integrity_continuous_volume() -> anyhow::Result<()> {
+        let path_1 = PathBuf::from("data/databento/GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-01-17T00:00:00Z_2024-01-24T00:00:00Z.dbn") ;
+        dbn_raw_count(path_1).await?;
+
+        // Parameters
+        let dataset = Dataset::Futures;
+        let context = midas_clilib::context::Context::init().expect("Error on context creation.");
+
+        // Seeed database
+        create_tickers().await.expect("Error creating tickers");
+        let upload_cmd = midas_clilib::cli::vendors::databento::DatabentoCommands::Upload {
+            dataset: dataset.as_str().to_string(),
+            dbn_filepath: "GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-01-17T00:00:00Z_2024-01-24T00:00:00Z.dbn".to_string(), 
+            dbn_downloadtype: "stream".to_string(),
+            midas_filepath: "system_tests_data.bin".to_string(),
+        };
+
+        upload_cmd
+            .process_command(&context)
+            .await
+            .expect("Error on upload.");
+
+        // Connection string for the PostgreSQL container
+        let database_url = "postgres://postgres:password@172.18.0.2:5432/market_data";
+
+        // let database_url = "postgres://postgres:password@localhost:5432/market_data";
+        let pool = PgPool::connect(database_url)
+            .await
+            .expect("Failed to connect to the database");
+        let query = "REFRESH MATERIALIZED VIEW futures_continuous_volume_windows;";
+        sqlx::query(query).execute(&pool).await?;
+
+        // Raw
+        test_raw_records_volume().await?;
+
+        // Continuous Calendar
+        test_continuous_volume().await?;
+
+        // Rolllover flag
+        test_rollover_volume().await?;
+
+        // Cleanup
+        teardown_tickers().await?;
+
+        Ok(())
+    }
+
+    async fn pull_continuous_volume_files(
+        tickers: Vec<String>,
+        schema: &Schema,
+        file: String,
+    ) -> anyhow::Result<()> {
+        dotenv().ok();
+
+        let base_url = "http://127.0.0.1:8080";
+        let client = Historical::new(&base_url);
+
+        let query_params = RetrieveParams::new(
+            tickers,
+            "2024-01-19 00:00:00",
+            "2024-01-24 00:00:00",
+            schema.clone(),
+            Dataset::Futures,
+            mbinary::enums::Stype::Continuous,
+        )?;
+
+        let _response = client.get_records_to_file(&query_params, &file).await?;
+
+        Ok(())
+    }
+
+    async fn test_continuous_volume() -> anyhow::Result<()> {
+        let schemas = vec![
+            Schema::Mbp1,
+            Schema::Tbbo,
+            Schema::Trades,
+            Schema::Ohlcv1S,
+            Schema::Ohlcv1M,
+            Schema::Ohlcv1H,
+            Schema::Ohlcv1D,
+            // Schema::Bbo1S,
+            // Schema::Bbo1M,
+        ];
+
+        println!("Testing Continuous Volume");
         for schema in &schemas {
             println!("Schema : {:?}", schema);
-            /*             let schema = Schema::Mbp1; */
-            let mbinary_file = format!(
-                "data/HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_{}.bin",
-                schema.to_string()
-            );
 
-            let start: &str = "2024-02-13 00:00:00";
-            let end: &str = "2024-02-17 00:00:00";
-
-            let _ = pull_raw_files(schema, mbinary_file.clone(), start, end).await?;
+            let mbinary_file = format!("data/HE.v.0_LE.v.0_{}.bin", schema.to_string());
+            let tickers = vec!["HE.v.0".to_string(), "LE.v.0".to_string()];
+            let _ = pull_continuous_volume_files(tickers, schema, mbinary_file.clone()).await?;
 
             let dbn_file = PathBuf::from(format!(
-            "data/databento/GLBX.MDP3_{}_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-02-13T00:00:00Z_2024-02-17T00:00:00Z.dbn",
-            schema.to_string()
-        ));
+                "data/databento/GLBX.MDP3_{}_HE.v.0_LE.v.0_2024-01-19T00:00:00Z_2024-01-24T00:00:00Z.dbn",
+                schema.to_string()
+            ));
+
+            // Test
+            compare_dbn_raw_output(dbn_file.clone(), &PathBuf::from(mbinary_file.clone())).await?;
+            let equal = compare_dbn(dbn_file, &PathBuf::from(mbinary_file.clone())).await?;
+            chronological_check(&PathBuf::from(mbinary_file)).await?;
+
+            assert!(equal);
+
+            let mbinary_file = format!("data/HE.v.1_LE.v.1_{}.bin", schema.to_string());
+            let tickers = vec!["HE.v.1".to_string(), "LE.v.1".to_string()];
+            let _ = pull_continuous_volume_files(tickers, schema, mbinary_file.clone()).await?;
+
+            let dbn_file = PathBuf::from(format!(
+                "data/databento/GLBX.MDP3_{}_HE.v.1_LE.v.1_2024-01-19T00:00:00Z_2024-01-24T00:00:00Z.dbn",
+                schema.to_string()
+            ));
 
             // Test
             compare_dbn_raw_output(dbn_file.clone(), &PathBuf::from(mbinary_file.clone())).await?;
@@ -669,6 +761,7 @@ mod tests {
 
         Ok(())
     }
+
     async fn test_raw_records_volume() -> anyhow::Result<()> {
         let schemas = vec![
             Schema::Mbp1,
@@ -712,39 +805,6 @@ mod tests {
         Ok(())
     }
 
-    async fn test_rollover_calendar() -> anyhow::Result<()> {
-        let schemas = vec![
-            Schema::Mbp1,
-            Schema::Tbbo,
-            Schema::Trades,
-            Schema::Ohlcv1S,
-            Schema::Ohlcv1M,
-            Schema::Ohlcv1H,
-            Schema::Ohlcv1D,
-            // Schema::Bbo1S,
-            // Schema::Bbo1M,
-        ];
-
-        for schema in &schemas {
-            let mbinary_file = format!(
-                "data/HE.c.0_HE.c.1_LE.c.0_LE.c.1_{}.bin",
-                schema.to_string()
-            );
-            let mut decoder = AsyncDecoder::<BufReader<File>>::from_file(mbinary_file).await?;
-
-            // Write MBN records to file
-            let mut rollover_records = Vec::new();
-            while let Some(mbinary_record) = decoder.decode_ref().await? {
-                let record_enum = RecordEnum::from_ref(mbinary_record)?;
-                if record_enum.msg().header().rollover_flag == 1 {
-                    rollover_records.push(record_enum);
-                }
-            }
-            assert_eq!(rollover_records.len(), 2);
-        }
-
-        Ok(())
-    }
     async fn test_rollover_volume() -> anyhow::Result<()> {
         let schemas = vec![
             Schema::Mbp1,
@@ -759,10 +819,7 @@ mod tests {
         ];
 
         for schema in &schemas {
-            let mbinary_file = format!(
-                "data/HE.v.0_HE.v.1_LE.v.0_LE.v.1_{}.bin",
-                schema.to_string()
-            );
+            let mbinary_file = format!("data/HE.v.0_LE.v.0_{}.bin", schema.to_string());
             let mut decoder = AsyncDecoder::<BufReader<File>>::from_file(mbinary_file).await?;
 
             // Write MBN records to file
@@ -773,70 +830,20 @@ mod tests {
                     rollover_records.push(record_enum);
                 }
             }
-            println!("{:?}", rollover_records);
-            assert_eq!(rollover_records.len(), 2);
-        }
+            assert_eq!(rollover_records.len(), 1);
 
-        Ok(())
-    }
-
-    use std::collections::HashMap;
-
-    #[allow(dead_code)]
-    async fn test_rollover2() -> anyhow::Result<()> {
-        let schemas = vec![
-            Schema::Mbp1,
-            Schema::Tbbo,
-            Schema::Trades,
-            Schema::Bbo1S,
-            Schema::Bbo1M,
-            Schema::Ohlcv1S,
-            Schema::Ohlcv1M,
-            Schema::Ohlcv1H,
-            Schema::Ohlcv1D,
-        ];
-
-        println!("Testing Rollovers: ");
-
-        // Iterate over each schema
-        for schema in &schemas {
-            let mbinary_file = format!(
-                "data/HE.c.0_HE.c.1_LE.c.0_LE.c.1_{}.bin",
-                schema.to_string()
-            );
-
+            let mbinary_file = format!("data/HE.v.1_LE.v.1_{}.bin", schema.to_string());
             let mut decoder = AsyncDecoder::<BufReader<File>>::from_file(mbinary_file).await?;
-            println!("{:?}", decoder.metadata());
 
-            // Create file to store rollover records
-            let mut mbinary_rollover_file =
-                File::create(format!("test_rollover_{}.txt", schema.to_string())).await?;
-
-            // Initialize a HashMap to count occurrences of instrument_ids
-            let mut instrument_count: HashMap<u32, u32> = HashMap::new();
-
-            // Decode and process the records
+            // Write MBN records to file
+            let mut rollover_records = Vec::new();
             while let Some(mbinary_record) = decoder.decode_ref().await? {
                 let record_enum = RecordEnum::from_ref(mbinary_record)?;
-
-                // Track the instrument_id count
-                let instrument_id = record_enum.msg().header().instrument_id;
-                *instrument_count.entry(instrument_id).or_insert(0) += 1;
-
-                // If rollover_flag is 1, write to the file
                 if record_enum.msg().header().rollover_flag == 1 {
-                    mbinary_rollover_file
-                        .write_all(format!("{:?}\n", record_enum).as_bytes())
-                        .await?;
+                    rollover_records.push(record_enum);
                 }
             }
-
-            // Print the count of each instrument_id to confirm distribution
-            println!(
-                "Instrument ID Counts for schema {}: {:?}",
-                schema.to_string(),
-                instrument_count
-            );
+            assert_eq!(rollover_records.len(), 1);
         }
 
         Ok(())
