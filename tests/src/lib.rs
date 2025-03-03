@@ -444,7 +444,8 @@ mod tests {
             .expect("Error on upload.");
 
         // Connection string for the PostgreSQL container
-        let database_url = "postgres://postgres:password@172.18.0.2:5432/market_data";
+        let database_url = "postgres://postgres:password@127.0.0.1:5434/market_data";
+
         let pool = PgPool::connect(database_url)
             .await
             .expect("Failed to connect to the database");
@@ -661,7 +662,7 @@ mod tests {
             .expect("Error on upload.");
 
         // Connection string for the PostgreSQL container
-        let database_url = "postgres://postgres:password@172.18.0.2:5432/market_data";
+        let database_url = "postgres://postgres:password@127.0.0.1:5434/market_data";
 
         // let database_url = "postgres://postgres:password@localhost:5432/market_data";
         let pool = PgPool::connect(database_url)
