@@ -125,6 +125,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34ac096ce696dc2fcabef30516bb13c0a68a11d30131d3df6f04711467681b04"
 
 [[package]]
+name = "application"
+version = "0.1.0"
+dependencies = [
+ "actix-rt",
+ "anyhow",
+ "async-stream",
+ "async-trait",
+ "axum 0.8.1",
+ "axum-test-helper",
+ "bytes",
+ "databento",
+ "dbn",
+ "dotenv",
+ "futures",
+ "hyper 1.6.0",
+ "log",
+ "mbinary",
+ "regex",
+ "reqwest 0.12.12",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2",
+ "sqlx",
+ "thiserror 2.0.11",
+ "tokio",
+ "tower 0.5.2",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "assert-json-diff"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -682,21 +714,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ctor"
-version = "0.3.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21d960ecacd0a1bf55e73144b72de745e7bf275c7952c50e36e8af0a0cb7ab1f"
-dependencies = [
- "ctor-proc-macro",
-]
-
-[[package]]
-name = "ctor-proc-macro"
-version = "0.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c426d2ba3e525b39c1f0a9ba41b9fe61878dee11fa4e4a76b6ab440f46c5db5d"
-
-[[package]]
 name = "databento"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1194,37 +1211,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
-name = "historical"
-version = "0.1.0"
-dependencies = [
- "actix-rt",
- "anyhow",
- "async-stream",
- "async-trait",
- "axum 0.8.1",
- "axum-test-helper",
- "bytes",
- "databento",
- "dbn",
- "dotenv",
- "futures",
- "hyper 1.6.0",
- "mbinary",
- "regex",
- "reqwest 0.12.12",
- "serde",
- "serde_json",
- "serial_test",
- "sha2",
- "sqlx",
- "thiserror 2.0.11",
- "tokio",
- "tower 0.5.2",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "hkdf"
 version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1603,34 +1589,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "instrument"
-version = "0.1.0"
-dependencies = [
- "actix-rt",
- "anyhow",
- "async-trait",
- "axum 0.8.1",
- "axum-test-helper",
- "bytes",
- "databento",
- "dbn",
- "dotenv",
- "hyper 1.6.0",
- "mbinary",
- "regex",
- "reqwest 0.12.12",
- "serde",
- "serde_json",
- "serial_test",
- "sqlx",
- "thiserror 2.0.11",
- "tokio",
- "tower 0.5.2",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "ipnet"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1762,9 +1720,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.25"
+version = "0.4.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04cbf5b083de1c7e0222a7a51dbfdba1cbe1c6ab0b15e29fff3f6c077fd9cd9f"
+checksum = "30bde2b3dc3671ae49d8e2e9f044c7c005836e7a023ee57cffa25ab82764bb9e"
 
 [[package]]
 name = "matchers"
@@ -1824,9 +1782,9 @@ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 
 [[package]]
 name = "midas-client"
-version = "1.0.21"
+version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79cd64b2240d2082a7a08a5088c7c9273ecd72a2cd7ff961a14430315addd45a"
+checksum = "b16636fb0fc4f94d50da0473adea9f7de6cd71783209abf9ede0d973d44af202"
 dependencies = [
  "chrono",
  "futures",
@@ -1842,8 +1800,8 @@ dependencies = [
 
 [[package]]
 name = "midas-clilib"
-version = "0.1.0"
-source = "git+https://github.com/midassystems/midas-shell.git?branch=main#f950c56a31c86488284be9c84b11d102950246e3"
+version = "0.1.1"
+source = "git+https://github.com/midassystems/midas-shell.git?branch=main#b1b95e0e9335398812baedd7d04d2046df0f62b6"
 dependencies = [
  "async-compression",
  "async-trait",
@@ -3302,7 +3260,6 @@ dependencies = [
  "async-trait",
  "axum 0.8.1",
  "chrono",
- "ctor",
  "databento",
  "dbn",
  "derive_more",
@@ -3657,38 +3614,6 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
-]
-
-[[package]]
-name = "trading"
-version = "0.1.0"
-dependencies = [
- "actix-rt",
- "anyhow",
- "async-stream",
- "async-trait",
- "axum 0.8.1",
- "axum-test-helper",
- "bytes",
- "chrono",
- "dotenv",
- "futures",
- "http-body 1.0.1",
- "http-body-util",
- "hyper 1.6.0",
- "mbinary",
- "regex",
- "reqwest 0.12.12",
- "serde",
- "serde_json",
- "serial_test",
- "sqlx",
- "thiserror 2.0.11",
- "tokio",
- "tokio-stream",
- "tower 0.5.2",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

@@ -235,7 +235,7 @@ mod tests {
     async fn create_tickers() -> anyhow::Result<()> {
         dotenv().ok();
 
-        let base_url = "http://127.0.0.1:8082";
+        let base_url = "http://127.0.0.1:8080";
         let client = Instruments::new(&base_url);
 
         let schema = dbn::Schema::from_str("mbp-1")?;
@@ -361,7 +361,7 @@ mod tests {
     async fn teardown_tickers() -> anyhow::Result<()> {
         dotenv().ok();
 
-        let base_url = "http://127.0.0.1:8082";
+        let base_url = "http://127.0.0.1:8080";
         let client = Instruments::new(&base_url);
 
         let tickers_to_delete = vec![

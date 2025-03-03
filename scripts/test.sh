@@ -22,24 +22,29 @@ teardown_test_containers() {
 
 historical() {
 	export HISTORICAL_DATABASE_URL=postgres://postgres:password@localhost:5433/market_data
-	export INSTRUMENT_DATABASE_URL=postgres://postgres:password@localhost:5433/market_data
+	export TRADING_DATABASE_URL=postgres://postgres:password@localhost:5433/trading_data
 
-	cargo test -p historical -- --nocapture
+	cargo test -p application historical -- --nocapture
 }
 trading() {
+	export HISTORICAL_DATABASE_URL=postgres://postgres:password@localhost:5433/market_data
 	export TRADING_DATABASE_URL=postgres://postgres:password@localhost:5433/trading_data
-	cargo test -p trading -- --nocapture
+	cargo test -p application trading -- --nocapture
 }
 
 instrument() {
-	export INSTRUMENT_DATABASE_URL=postgres://postgres:password@localhost:5433/market_data
-	cargo test -p instrument -- --nocapture
+	export HISTORICAL_DATABASE_URL=postgres://postgres:password@localhost:5433/market_data
+	export TRADING_DATABASE_URL=postgres://postgres:password@localhost:5433/trading_data
+
+	cargo test -p application instrument -- --nocapture
 }
 
 all() {
-	historical
-	trading
-	instrument
+	export HISTORICAL_DATABASE_URL=postgres://postgres:password@localhost:5433/market_data
+	export TRADING_DATABASE_URL=postgres://postgres:password@localhost:5433/trading_data
+
+	cargo test -p application -- --nocapture
+
 }
 
 system() {
@@ -55,7 +60,6 @@ system() {
 	echo "Waiting for services to start..."
 	sleep 10
 
-	# cd tests || exit 1
 	cargo test -p tests -- --nocapture
 
 	echo "Tearing down containers ..."

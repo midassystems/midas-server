@@ -31,15 +31,15 @@ services:
     networks:
       - app-network
 
-  # Historical service
-  dev-historical-service: 
+  dev-api-service: 
     build:
       context: .
-      dockerfile: "./historical/Dockerfile"
+      dockerfile: "./application/Dockerfile"
     environment:
       HISTORICAL_DATABASE_URL: postgres://postgres:password@dev-postgres:5432/market_data
-      HISTORICAL_PORT: "8080"
-      LOG_FILE: /app/logs/historical.log
+      TRADING_DATABASE_URL: postgres://postgres:password@dev-postgres:5432/trading_data
+      API_PORT: "8080"
+      LOG_FILE: /app/logs/midas-api.log
       LOG_LEVEL: info
     depends_on:
       - dev-migrate-database
@@ -49,56 +49,9 @@ services:
       - data:/app/data
       - logs:/app/logs
       - scripts:/app/scripts
-    command: ["./midas-historical"]
+    command: ["./midas-api"]
     networks:
       - app-network 
-    restart: always
-
-  # Trading service
-  dev-trading-service: 
-    build:
-      context: .
-      dockerfile: "./trading/Dockerfile"
-    environment:
-      TRADING_DATABASE_URL: postgres://postgres:password@dev-postgres:5432/trading_data
-      TRADING_PORT: "8081" 
-      LOG_FILE: /app/logs/trading.log
-      LOG_LEVEL: info
-    depends_on:
-      - dev-migrate-database
-    ports:
-      - "8081:8081"  
-    volumes:
-      - data:/app/data
-      - logs:/app/logs
-      - scripts:/app/scripts
-    command: ["./midas-trading"]
-    networks:
-      - app-network
-    restart: always
-
-
-  # Instrument service
-  dev-instrument-service: 
-    build:
-      context: .
-      dockerfile: "./instrument/Dockerfile"
-    environment:
-      INSTRUMENT_DATABASE_URL: postgres://postgres:password@dev-postgres:5432/market_data
-      INSTRUMENT_PORT: "8082" 
-      LOG_FILE: /app/logs/instrument.log
-      LOG_LEVEL: info
-    depends_on:
-      - dev-migrate-database
-    ports:
-      - "8082:8082"  
-    volumes:
-      - data:/app/data
-      - logs:/app/logs
-      - scripts:/app/scripts
-    command: ["./midas-instrument"]
-    networks:
-      - app-network
     restart: always
 
 networks:

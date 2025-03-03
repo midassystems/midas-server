@@ -1,9 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-  "historical", 
-  "instrument", 
+  "application",
   "tests", 
-  "trading",
 ]
 
