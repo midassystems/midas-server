@@ -1,13 +1,5 @@
 #!/bin/bash
 
-# Wait for PostgreSQL service to be ready
-until pg_isready -h "$POSTGRES_HOST" -U "$POSTGRES_USER"; do
-	echo "PostgreSQL is not ready yet. Retrying in 2 seconds..."
-	sleep 2
-done
-
-echo "PostgreSQL is ready. Running migrations..."
-
 # Change to the root directory of the project where .env is located
 cd "$(dirname "$0")/.." || exit 1
 
@@ -24,6 +16,14 @@ if [ "$#" -lt 1 ]; then
 fi
 
 DATABASE=$1
+
+# Wait for PostgreSQL service to be ready
+until pg_isready -h "$POSTGRES_HOST" -U "$POSTGRES_USER"; do
+	echo "PostgreSQL is not ready yet. Retrying in 2 seconds..."
+	sleep 2
+done
+
+echo "PostgreSQL is ready. Running migrations..."
 
 if [ "$DATABASE" == "trading" ]; then
 	cd database/trading || exit 1
