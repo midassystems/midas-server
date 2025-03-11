@@ -207,13 +207,8 @@ pub async fn compare_dbn(
     // Return an error if there are unmatched records in either batch
     if mbinary_batch.is_empty() && unmatched_dbn_records.is_empty() {
         return Ok(true);
-        // println!("All records match successfully.");
     } else {
         return Ok(false);
-        // eprintln!(
-        // "Unmatched records detected. Check the output file: {:?}",
-        // output_file
-        // );
     }
 }
 
@@ -227,7 +222,8 @@ mod tests {
     use mbinary::vendors::{DatabentoData, VendorData, Vendors};
     use midas_client::historical::Historical;
     use midas_client::instrument::Instruments;
-    use midas_clilib::{self, cli::ProcessCommand};
+    use midas_clilib::cli::commands::vendors::databento::DatabentoCommands;
+    use midas_clilib::TaskManager;
     use serial_test::serial;
     use sqlx::PgPool;
     use std::str::FromStr;
@@ -428,10 +424,11 @@ mod tests {
         // Parameters
         let dataset = Dataset::Futures;
         let context = midas_clilib::context::Context::init().expect("Error on context creation.");
+        let task_manager = TaskManager::new(context);
 
         // Seed Database
         create_tickers().await.expect("Error creating tickers");
-        let upload_cmd = midas_clilib::cli::vendors::databento::DatabentoCommands::Upload {
+        let upload_cmd = DatabentoCommands::Upload {
             dataset: dataset.as_str().to_string(),
             dbn_filepath: "GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-02-09T00:00:00Z_2024-02-17T00:00:00Z.dbn".to_string(),
             dbn_downloadtype: "stream".to_string(),
@@ -439,7 +436,7 @@ mod tests {
         };
 
         upload_cmd
-            .process_command(&context)
+            .process_command(task_manager)
             .await
             .expect("Error on upload.");
 
@@ -646,10 +643,11 @@ mod tests {
         // Parameters
         let dataset = Dataset::Futures;
         let context = midas_clilib::context::Context::init().expect("Error on context creation.");
+        let task_manager = TaskManager::new(context);
 
         // Seeed database
         create_tickers().await.expect("Error creating tickers");
-        let upload_cmd = midas_clilib::cli::vendors::databento::DatabentoCommands::Upload {
+        let upload_cmd = DatabentoCommands::Upload {
             dataset: dataset.as_str().to_string(),
             dbn_filepath: "GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-01-17T00:00:00Z_2024-01-24T00:00:00Z.dbn".to_string(), 
             dbn_downloadtype: "stream".to_string(),
@@ -657,14 +655,13 @@ mod tests {
         };
 
         upload_cmd
-            .process_command(&context)
+            .process_command(task_manager)
             .await
             .expect("Error on upload.");
 
         // Connection string for the PostgreSQL container
         let database_url = "postgres://postgres:password@127.0.0.1:5434/market_data";
 
-        // let database_url = "postgres://postgres:password@localhost:5432/market_data";
         let pool = PgPool::connect(database_url)
             .await
             .expect("Failed to connect to the database");
