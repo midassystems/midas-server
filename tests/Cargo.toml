@@ -21,9 +21,9 @@ mockito = "1.6.1"
 dbn = "0.28.0"
 databento = "0.20.0"
 async-compression = { version = "0.4.11", features = ["tokio", "zstd"] }
-mbinary = {version= "1.0.26"}
+mbinary = {version= "1.0.35"}
 midas-client = {version = "1.0.22"}
-midas-clilib = { git = "https://github.com/midassystems/midas-shell.git", branch =  "main" }
+midas-clilib = { git = "https://github.com/midassystems/midas-shell.git", branch =  "updated_mbinary_instrument_fields" }
 
 [dev-dependencies]
 serial_test = "3.1.1"

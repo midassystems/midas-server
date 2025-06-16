@@ -137,14 +137,12 @@ pub async fn compare_dbn(
     dbn_filepath: PathBuf,
     mbinary_filepath: &PathBuf,
 ) -> anyhow::Result<bool> {
-    let batch_size = 1000; // New parameter to control batch size
+    let batch_size = 100000; // New parameter to control batch size
     let mut mbinary_decoder = read_mbinary_file(mbinary_filepath).await?;
     let (mut dbn_decoder, _map) = read_dbn_file(dbn_filepath).await?;
 
     let mut mbinary_batch: HashMap<u64, Vec<RecordEnum>> = HashMap::new();
     let mut mbinary_decoder_done = false;
-
-    // Keep track of any unmatched DBN records
     let mut unmatched_dbn_records = Vec::new();
 
     // Start decoding and comparing
@@ -160,8 +158,14 @@ pub async fn compare_dbn(
                 mbinary_decoder_done = true; // No more MBN records
             }
         }
-        let dbn_record_enum = dbn_record.as_enum()?.to_owned();
-        let ts_event = dbn_record_enum.header().ts_event; // Extract ts_event from DBN record
+        let dbn_record_enum: dbn::RecordEnum = dbn_record.as_enum()?.to_owned();
+        let ts_event = match &dbn_record_enum.rtype().unwrap() {
+            dbn::RType::Bbo1S | dbn::RType::Bbo1M => match &dbn_record_enum {
+                dbn::RecordEnum::Mbp1(msg) => msg.ts_recv,
+                _ => return Err(anyhow::Error::msg("Invalid record type")),
+            },
+            _ => dbn_record_enum.header().ts_event,
+        };
 
         // Check if the ts_event exists in the MBN map
         if let Some(mbinary_group) = mbinary_batch.get_mut(&ts_event) {
@@ -223,7 +227,7 @@ mod tests {
     use midas_client::historical::Historical;
     use midas_client::instrument::Instruments;
     use midas_clilib::cli::commands::vendors::databento::DatabentoCommands;
-    use midas_clilib::TaskManager;
+    use midas_clilib::{self, TaskManager};
     use serial_test::serial;
     use sqlx::PgPool;
     use std::str::FromStr;
@@ -257,6 +261,7 @@ mod tests {
             1709229600000000000,
             1704067200000000000,
             1709229600000000000,
+            false,
             true,
         ));
 
@@ -271,6 +276,7 @@ mod tests {
             1707933600000000000,
             1704067200000000000,
             1707933600000000000,
+            false,
             true,
         ));
 
@@ -285,6 +291,7 @@ mod tests {
             1712941200000000000,
             1704067200000000000,
             1712941200000000000,
+            false,
             true,
         ));
 
@@ -299,6 +306,7 @@ mod tests {
             1714496400000000000,
             1704067200000000000,
             1714496400000000000,
+            false,
             true,
         ));
 
@@ -313,6 +321,7 @@ mod tests {
             1715706000000000000,
             1704067200000000000,
             1715706000000000000,
+            false,
             true,
         ));
 
@@ -327,6 +336,7 @@ mod tests {
             1718384400000000000,
             1704067200000000000,
             1718384400000000000,
+            false,
             true,
         ));
 
@@ -341,6 +351,127 @@ mod tests {
             1719594000000000000,
             1704067200000000000,
             1719594000000000000,
+            false,
+            true,
+        ));
+
+        // LEM4
+        instruments.push(Instrument::new(
+            None,
+            "LE.c.0",
+            "LiveCattle-c-0",
+            dataset,
+            Vendors::Internal,
+            0,
+            0,
+            0,
+            0,
+            true,
+            true,
+        ));
+
+        // LEM4
+        instruments.push(Instrument::new(
+            None,
+            "LE.c.1",
+            "LiveCattle-c-1",
+            dataset,
+            Vendors::Internal,
+            0,
+            0,
+            0,
+            0,
+            true,
+            true,
+        ));
+
+        // LEM4
+        instruments.push(Instrument::new(
+            None,
+            "LE.v.0",
+            "LiveCattle-v-0",
+            dataset,
+            Vendors::Internal,
+            0,
+            0,
+            0,
+            0,
+            true,
+            true,
+        ));
+
+        // LEM4
+        instruments.push(Instrument::new(
+            None,
+            "LE.v.1",
+            "LiveCattle-v-1",
+            dataset,
+            Vendors::Internal,
+            0,
+            0,
+            0,
+            0,
+            true,
+            true,
+        ));
+
+        // LEM4
+        instruments.push(Instrument::new(
+            None,
+            "HE.c.0",
+            "LeanHogs-c-0",
+            dataset,
+            Vendors::Internal,
+            0,
+            0,
+            0,
+            0,
+            true,
+            true,
+        ));
+
+        // LEM4
+        instruments.push(Instrument::new(
+            None,
+            "HE.c.1",
+            "LeanHogs-c-1",
+            dataset,
+            Vendors::Internal,
+            0,
+            0,
+            0,
+            0,
+            true,
+            true,
+        ));
+
+        // LEM4
+        instruments.push(Instrument::new(
+            None,
+            "HE.v.0",
+            "LeanHogs-v-0",
+            dataset,
+            Vendors::Internal,
+            0,
+            0,
+            0,
+            0,
+            true,
+            true,
+        ));
+
+        // LEM4
+        instruments.push(Instrument::new(
+            None,
+            "HE.v.1",
+            "LeanHogs-v-1",
+            dataset,
+            Vendors::Internal,
+            0,
+            0,
+            0,
+            0,
+            true,
             true,
         ));
 
@@ -368,6 +499,14 @@ mod tests {
             "HEK4".to_string(),
             "HEM4".to_string(),
             "LEM4".to_string(),
+            "LE.c.0".to_string(),
+            "LE.c.1".to_string(),
+            "LE.v.0".to_string(),
+            "LE.v.1".to_string(),
+            "HE.c.0".to_string(),
+            "HE.c.1".to_string(),
+            "HE.v.0".to_string(),
+            "HE.v.1".to_string(),
         ];
 
         for ticker in tickers_to_delete {
@@ -446,7 +585,7 @@ mod tests {
         let pool = PgPool::connect(database_url)
             .await
             .expect("Failed to connect to the database");
-        let query = "REFRESH MATERIALIZED VIEW futures_continuous_calendar_windows;";
+        let query = "REFRESH MATERIALIZED VIEW futures_continuous;";
         sqlx::query(query).execute(&pool).await?;
 
         // Raw
@@ -497,8 +636,8 @@ mod tests {
             Schema::Ohlcv1M,
             Schema::Ohlcv1H,
             Schema::Ohlcv1D,
-            // Schema::Bbo1S,
-            // Schema::Bbo1M,
+            Schema::Bbo1M,
+            // Schema::Bbo1S, // 2 record not aligned appears they are missing from dbn
         ];
 
         println!("Testing Raw Tickers: ");
@@ -540,8 +679,8 @@ mod tests {
             Schema::Ohlcv1M,
             Schema::Ohlcv1H,
             Schema::Ohlcv1D,
-            // Schema::Bbo1S,
-            // Schema::Bbo1M,
+            Schema::Bbo1S,
+            Schema::Bbo1M,
         ];
 
         println!("Testing Continuous Calendar ");
@@ -596,28 +735,36 @@ mod tests {
             Schema::Ohlcv1M,
             Schema::Ohlcv1H,
             Schema::Ohlcv1D,
-            // Schema::Bbo1S,
-            // Schema::Bbo1M,
+            Schema::Bbo1S,
+            Schema::Bbo1M,
         ];
 
         for schema in &schemas {
             // Rank 0
             let mbinary_file = format!("data/HE.c.0_LE.c.0_{}.bin", schema.to_string());
-            let mut decoder = AsyncDecoder::<BufReader<File>>::from_file(mbinary_file).await?;
+            let mut decoder =
+                AsyncDecoder::<BufReader<File>>::from_file(mbinary_file.clone()).await?;
 
             // Write MBN records to file
             let mut rollover_records = Vec::new();
             while let Some(mbinary_record) = decoder.decode_ref().await? {
                 let record_enum = RecordEnum::from_ref(mbinary_record)?;
                 if record_enum.msg().header().rollover_flag == 1 {
+                    // println!("{:?}", record_enum);
                     rollover_records.push(record_enum);
                 }
             }
-            assert_eq!(rollover_records.len(), 1);
+            assert_eq!(
+                rollover_records.len(),
+                1,
+                "More rollover flags than expected : {}",
+                mbinary_file
+            );
 
             // Rank 1
             let mbinary_file = format!("data/HE.c.1_LE.c.1_{}.bin", schema.to_string());
-            let mut decoder = AsyncDecoder::<BufReader<File>>::from_file(mbinary_file).await?;
+            let mut decoder =
+                AsyncDecoder::<BufReader<File>>::from_file(mbinary_file.clone()).await?;
 
             // Write MBN records to file
             let mut rollover_records = Vec::new();
@@ -627,7 +774,12 @@ mod tests {
                     rollover_records.push(record_enum);
                 }
             }
-            assert_eq!(rollover_records.len(), 1);
+            assert_eq!(
+                rollover_records.len(),
+                1,
+                "More rollover flags than expected : {}",
+                mbinary_file
+            );
         }
 
         Ok(())
@@ -649,7 +801,7 @@ mod tests {
         create_tickers().await.expect("Error creating tickers");
         let upload_cmd = DatabentoCommands::Upload {
             dataset: dataset.as_str().to_string(),
-            dbn_filepath: "GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-01-17T00:00:00Z_2024-01-24T00:00:00Z.dbn".to_string(), 
+            dbn_filepath: "GLBX.MDP3_mbp-1_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_2024-01-17T00:00:00Z_2024-01-24T00:00:00Z.dbn".to_string(),
             dbn_downloadtype: "stream".to_string(),
             midas_filepath: "system_tests_data.bin".to_string(),
         };
@@ -661,11 +813,10 @@ mod tests {
 
         // Connection string for the PostgreSQL container
         let database_url = "postgres://postgres:password@127.0.0.1:5434/market_data";
-
         let pool = PgPool::connect(database_url)
             .await
             .expect("Failed to connect to the database");
-        let query = "REFRESH MATERIALIZED VIEW futures_continuous_volume_windows;";
+        let query = "REFRESH MATERIALIZED VIEW futures_continuous;";
         sqlx::query(query).execute(&pool).await?;
 
         // Raw
@@ -716,8 +867,8 @@ mod tests {
             Schema::Ohlcv1M,
             Schema::Ohlcv1H,
             Schema::Ohlcv1D,
-            // Schema::Bbo1S,
-            // Schema::Bbo1M,
+            Schema::Bbo1M,
+            Schema::Bbo1S,
         ];
 
         println!("Testing Continuous Volume");
@@ -769,14 +920,13 @@ mod tests {
             Schema::Ohlcv1M,
             Schema::Ohlcv1H,
             Schema::Ohlcv1D,
-            // Schema::Bbo1S,
-            // Schema::Bbo1M,
+            Schema::Bbo1M,
+            Schema::Bbo1S,
         ];
 
         println!("Testing Raw Tickers: ");
         for schema in &schemas {
             println!("Schema : {:?}", schema);
-            /*             let schema = Schema::Mbp1; */
             let mbinary_file = format!(
                 "data/v_HEG4_HEJ4_LEG4_LEJ4_LEM4_HEM4_HEK4_{}.bin",
                 schema.to_string()
@@ -812,8 +962,8 @@ mod tests {
             Schema::Ohlcv1M,
             Schema::Ohlcv1H,
             Schema::Ohlcv1D,
-            // Schema::Bbo1S,
-            // Schema::Bbo1M,
+            Schema::Bbo1M,
+            Schema::Bbo1S,
         ];
 
         for schema in &schemas {
@@ -828,20 +978,31 @@ mod tests {
                     rollover_records.push(record_enum);
                 }
             }
-            assert_eq!(rollover_records.len(), 1);
+
+            assert_eq!(
+                rollover_records.len(),
+                1,
+                "Rollover count was not 1 for schema: {:?}",
+                schema
+            );
 
             let mbinary_file = format!("data/HE.v.1_LE.v.1_{}.bin", schema.to_string());
             let mut decoder = AsyncDecoder::<BufReader<File>>::from_file(mbinary_file).await?;
 
             // Write MBN records to file
-            let mut rollover_records = Vec::new();
+            let mut rollover_records2 = Vec::new();
             while let Some(mbinary_record) = decoder.decode_ref().await? {
                 let record_enum = RecordEnum::from_ref(mbinary_record)?;
                 if record_enum.msg().header().rollover_flag == 1 {
-                    rollover_records.push(record_enum);
+                    rollover_records2.push(record_enum);
                 }
             }
-            assert_eq!(rollover_records.len(), 1);
+            assert_eq!(
+                rollover_records2.len(),
+                1,
+                "Rollover count was not 1 for schema: {:?}",
+                schema
+            );
         }
 
         Ok(())

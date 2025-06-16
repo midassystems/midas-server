@@ -11,10 +11,7 @@ pub const FUTURES_MBP1_QUERY: &str = r#"
         m.ts_in_delta, 
         m.sequence, 
         m.discriminator,
-        CASE 
-            WHEN $5 THEN LEFT(i.ticker, 2) || $6
-            ELSE i.ticker 
-        END AS ticker,
+        0 AS rollover_flag,
         b.bid_px, 
         b.bid_sz, 
         b.bid_ct, 
@@ -28,7 +25,7 @@ pub const FUTURES_MBP1_QUERY: &str = r#"
     AND i.ticker = ANY($3)
     AND ($4 IS FALSE OR m.action = 84)
     ORDER BY m.ts_recv
-    "#;
+"#;
 
 pub const FUTURES_TRADE_QUERY: &str = r#"
     SELECT 
@@ -41,19 +38,16 @@ pub const FUTURES_TRADE_QUERY: &str = r#"
         m.flags, 
         m.ts_recv, 
         m.ts_in_delta, 
-        m.sequence, 
-        CASE 
-            WHEN $4 THEN LEFT(i.ticker, 2) || $5
-            ELSE i.ticker 
-        END AS ticker
+        0 AS rollover_flag,
+        m.sequence
     FROM futures_mbp m
     INNER JOIN futures i ON m.instrument_id = i.instrument_id
     LEFT JOIN futures_bid_ask b ON m.id = b.mbp_id AND b.depth = 0
     WHERE m.ts_recv BETWEEN $1 AND $2
     AND i.ticker = ANY($3)
-    AND m.action = 84  -- Filter only trades where action is 'T' (ASCII 84)
+    AND m.action = 84  
     ORDER BY m.ts_recv
-    "#;
+"#;
 
 pub const FUTURES_OHLCV_QUERY: &str = r#"
     WITH ordered_data AS (
@@ -91,215 +85,366 @@ pub const FUTURES_OHLCV_QUERY: &str = r#"
       a.close,
       a.low,
       a.high,
-      a.volume,
-      CASE 
-        WHEN $5 THEN LEFT(i.ticker, 2) || $6
-        ELSE i.ticker 
-      END AS ticker
+      0 AS rollover_flag,
+      a.volume
     FROM aggregated_data a
     INNER JOIN futures i ON a.instrument_id = i.instrument_id
     ORDER BY a.ts_event
-    "#;
+"#;
 
 pub const FUTURES_BBO_QUERY: &str = r#"
     WITH ordered_data AS (
-        SELECT
-            m.id,
-            m.instrument_id,
-            m.ts_event,
-            m.price,
-            m.size,
-            m.action,
-            m.side,
-            m.flags,
-            m.sequence,
-            m.ts_recv,
-            b.bid_px,
-            b.ask_px,
-            b.bid_sz,
-            b.ask_sz,
-            b.bid_ct,
-            b.ask_ct,
-            row_number() OVER (PARTITION BY m.instrument_id, floor((m.ts_recv - 1) / $3) * $3 ORDER BY m.ts_recv ASC, m.ctid ASC) AS first_row,
-            row_number() OVER (PARTITION BY m.instrument_id, floor((m.ts_recv - 1) / $3) * $3 ORDER BY m.ts_recv DESC, m.ctid DESC) AS last_row
-        FROM futures_mbp m
-        INNER JOIN futures i ON m.instrument_id = i.instrument_id
-        LEFT JOIN futures_bid_ask b ON m.id = b.mbp_id AND b.depth = 0
-        WHERE m.ts_recv BETWEEN ($1 - 86400000000000) AND $2
-        AND i.ticker = ANY($4)
+      SELECT
+          m.id,
+          m.instrument_id,
+          m.ts_recv,
+          b.bid_px,
+          b.ask_px,
+          b.bid_sz,
+          b.ask_sz,
+          b.bid_ct,
+          b.ask_ct,
+          0 AS rollover_flag,
+          row_number() OVER (
+            PARTITION BY m.instrument_id, floor((m.ts_recv - 1) / $3) * $3
+            ORDER BY m.ts_recv DESC, m.ctid DESC
+          ) AS last_row
+      FROM futures_mbp m
+      INNER JOIN futures i ON m.instrument_id = i.instrument_id
+      LEFT JOIN futures_bid_ask b ON m.id = b.mbp_id AND b.depth = 0
+      WHERE m.ts_recv BETWEEN $1 AND $2
+      AND i.ticker = ANY($4)
     ),
-    -- Subquery to get the last trade event
-    trade_data AS (
-        SELECT
-            instrument_id,
-            floor((ts_recv - 1) / $3) * $3 AS ts_recv_start,
-            MAX(ts_recv) AS last_trade_ts_recv,
-            MAX(id) AS last_trade_id
-        FROM ordered_data
-        WHERE action = 84 -- Only consider trades (action = 84)
-        GROUP BY instrument_id, floor((ts_recv - 1) / $3) * $3
+    last_rows AS (
+      SELECT *
+      FROM ordered_data
+      WHERE last_row = 1
     ),
     aggregated_data AS (
-        SELECT
-            o.instrument_id,
-            floor((o.ts_recv - 1) / $3) * $3 AS ts_recv,
-            MAX(o.ts_event) FILTER (WHERE o.ts_recv = t.last_trade_ts_recv AND o.id = t.last_trade_id AND o.action = 84) AS ts_event,  -- Correct reference for ts_event
-            MIN(o.bid_px) FILTER (WHERE o.last_row = 1) AS last_bid_px,
-            MIN(o.ask_px) FILTER (WHERE o.last_row = 1) AS last_ask_px,
-            MIN(o.bid_sz) FILTER (WHERE o.last_row = 1) AS last_bid_sz,
-            MIN(o.ask_sz) FILTER (WHERE o.last_row = 1) AS last_ask_sz,
-            MIN(o.bid_ct) FILTER (WHERE o.last_row = 1) AS last_bid_ct,
-            MIN(o.ask_ct) FILTER (WHERE o.last_row = 1) AS last_ask_ct,
-            MAX(o.price) FILTER (WHERE o.ts_recv = t.last_trade_ts_recv AND o.id = t.last_trade_id AND o.action = 84) AS last_trade_price,
-            MAX(o.size) FILTER (WHERE o.ts_recv = t.last_trade_ts_recv AND o.id = t.last_trade_id AND o.action = 84) AS last_trade_size,
-            MAX(o.side) FILTER (WHERE o.ts_recv = t.last_trade_ts_recv AND o.id = t.last_trade_id AND o.action = 84) AS last_trade_side,
-            MAX(o.flags) FILTER (WHERE o.last_row = 1) AS last_trade_flags,
-            MIN(o.sequence) FILTER (WHERE o.last_row = 1) AS last_trade_sequence
-        FROM ordered_data o
-        LEFT JOIN trade_data t ON o.instrument_id = t.instrument_id AND floor((o.ts_recv - 1) / $3) * $3 = t.ts_recv_start
-        GROUP BY o.instrument_id, floor((o.ts_recv - 1) / $3) * $3, t.last_trade_ts_recv, t.last_trade_id
-    ),
-    -- Step 1: Forward-fill ts_event
-    filled_ts_event AS (
-        SELECT
-            a.instrument_id,
-            MAX(a.ts_event) OVER (PARTITION BY a.instrument_id ORDER BY a.ts_recv ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS ts_event,  -- Forward-fill ts_event
-            a.ts_recv,
-            a.last_bid_px,
-            a.last_ask_px,
-            a.last_bid_sz,
-            a.last_ask_sz,
-            a.last_bid_ct,
-            a.last_ask_ct,
-            a.last_trade_price,
-            a.last_trade_size,
-            a.last_trade_side,
-            a.last_trade_flags,
-            a.last_trade_sequence
-        FROM aggregated_data a
-    ),
-    -- Step 2: Forward-fill price and size based on the now-filled ts_event
-    filled_price_size AS (
-        SELECT
-            f.instrument_id,
-            f.ts_event,
-            CAST(f.ts_recv + $3 AS BIGINT) AS ts_recv,
-            find_last_ignore_nulls(f.last_trade_price) OVER (PARTITION BY f.instrument_id ORDER BY f.ts_recv) AS price,
-            find_last_ignore_nulls(f.last_trade_size) OVER (PARTITION BY f.instrument_id ORDER BY f.ts_recv) AS size,
-            find_last_ignore_nulls(f.last_trade_side) OVER (PARTITION BY f.instrument_id ORDER BY f.ts_recv) AS side,
-            f.last_bid_px AS bid_px,
-            f.last_ask_px AS ask_px,
-            f.last_bid_sz AS bid_sz,
-            f.last_ask_sz AS ask_sz,
-            f.last_bid_ct AS bid_ct,
-            f.last_ask_ct AS ask_ct,
-            f.last_trade_flags AS flags,
-            f.last_trade_sequence AS sequence
-        FROM filled_ts_event f
+      SELECT
+        instrument_id,
+        CAST(CEIL(ts_recv::double precision / $3) * $3 AS BIGINT) AS ts_event,
+        rollover_flag,
+        bid_px,
+        ask_px,
+        bid_sz,
+        ask_sz,
+        bid_ct,
+        ask_ct
+      FROM last_rows
     )
     SELECT
-        fp.instrument_id,
-        fp.ts_event,
-        fp.ts_recv,
-        fp.bid_px,
-        fp.ask_px,
-        fp.bid_sz,
-        fp.ask_sz,
-        fp.bid_ct,
-        fp.ask_ct,
-        fp.price,  -- Forward-filled price based on ts_event
-        fp.size,   -- Forward-filled size based on ts_event
-        fp.side,
-        fp.flags,
-        fp.sequence,
-        CASE 
-            WHEN $5 THEN LEFT(i.ticker, 2) || $6
-            ELSE i.ticker 
-        END AS ticker
-    FROM filled_price_size fp
-    INNER JOIN futures i ON fp.instrument_id = i.instrument_id
-    WHERE fp.ts_recv BETWEEN $1 AND ($2 - $3)
-    ORDER BY fp.ts_recv
-    "#;
-
-pub const FUTURES_VOLUME_ROLLING_WINDOW: &str = r#"
-    with raw_data  AS (
-        SELECT 
-          ticker,
-          instrument_id, 
-          rank, 
-          start_time,
-          end_time
-        FROM futures_continuous_volume_windows vw
-        WHERE end_time > $1  
-        AND start_time < $2 
-        AND ticker LIKE ANY($3) 
-        AND rank = $4 
-    ),
-    adjusted_data AS (
-        SELECT 
-            rd.ticker,
-            rd.instrument_id,
-            LEFT(rd.ticker, 2) || '.v.' || $4 AS continuous_ticker,
-            rd.rank,
-            CASE 
-                WHEN rd.start_time < $1  -- Adjust start_time
-                THEN $1
-                ELSE rd.start_time
-            END::BIGINT AS start_time,
-            CASE 
-                WHEN rd.end_time > $2  -- Adjust end_time
-                THEN $2 
-                ELSE rd.end_time
-            END::BIGINT AS end_time
-        FROM raw_data rd
-    )
-    SELECT * 
-    FROM adjusted_data
-    ORDER BY start_time;
+      b.instrument_id,
+      b.ts_event,
+      b.rollover_flag,
+      b.bid_px,
+      b.ask_px,
+      b.bid_sz,
+      b.ask_sz,
+      b.bid_ct,
+      b.ask_ct
+    FROM aggregated_data b
+    ORDER BY b.ts_event
 "#;
 
-pub const FUTURES_CALENDAR_ROLLING_WINDOW: &str = r#"
-WITH raw_data AS (
-    SELECT 
-        ticker,
-        instrument_id, 
-        rank,
-        start_time,
-        end_time
-    FROM futures_continuous_calendar_windows
-    WHERE end_time > $1  -- start-time 
-    AND ticker LIKE ANY($3)
-),
-adjusted_data AS (
-    SELECT 
-        LEAD(ticker, $4) OVER (
-            PARTITION BY LEFT(ticker, 2)
-            ORDER BY rank
-        ) AS ticker,
-        LEAD(instrument_id, $4) OVER (
-            PARTITION BY LEFT(ticker, 2)
-            ORDER BY rank
-        ) AS instrument_id,
+// Rollover flag is assigned to next ts_recv after start of rollover day
+// Rolover could be a day lagged if there was no activity on the day of rollover (TBBO)
+pub const FUTURES_CONTINUOUS_MBP1_QUERY: &str = r#"
+    WITH continuous_tickers AS (
+        SELECT *
+        FROM futures_continuous
+        WHERE ts_day BETWEEN $1 AND $2
+        AND continuous_ticker = ANY($3)
+    ), 
+    filtered_mbp AS (
+      SELECT
+        ct.continuous_instrument_id,
+        mp.*,
         ROW_NUMBER() OVER (
-            PARTITION BY LEFT(ticker, 2)
-            ORDER BY rank
-        ) - 1 AS rank, -- Dynamically calculate the shifted rank
-        LEFT(ticker, 2) || '.c.' || $4 AS continuous_ticker,
-        CASE 
-            WHEN start_time < $1 
-            THEN $1 
-            ELSE start_time
-        END::BIGINT AS start_time,
-        CASE 
-            WHEN end_time > $2 
-            THEN $2 
-            ELSE end_time
-        END::BIGINT AS end_time
-    FROM raw_data
-)
-SELECT * 
-FROM adjusted_data
-WHERE ticker IS NOT NULL
-AND start_time <> end_time;
+          PARTITION BY ct.continuous_ticker, ct.ts_day
+          ORDER BY mp.ts_recv
+        ) AS rn
+      FROM continuous_tickers ct
+      INNER JOIN futures_mbp mp
+        ON ct.instrument_id = mp.instrument_id
+        AND mp.ts_recv >= ct.ts_day
+        AND mp.ts_recv < ct.ts_day + 86400000000000
+        AND ($4 IS FALSE OR mp.action = 84)  
+    ),
+    rollovers AS (
+      SELECT
+        continuous_instrument_id,
+        ts_day
+      FROM futures_continuous
+      WHERE rollover_flag = 1
+      AND continuous_ticker = ANY($3)
+    ),
+    rollover_event AS (
+      SELECT DISTINCT ON (r.continuous_instrument_id, r.ts_day)
+        mp.*,
+        1 AS rollover_flag
+      FROM rollovers r
+      JOIN filtered_mbp mp
+      ON mp.continuous_instrument_id = r.continuous_instrument_id
+      AND mp.ts_recv >= r.ts_day
+      ORDER BY r.continuous_instrument_id, r.ts_day, mp.ts_recv
+    ),
+    final_data AS (
+      SELECT 
+         f.*,
+        COALESCE(r.rollover_flag, 0) AS rollover_flag
+      FROM filtered_mbp f
+      LEFT JOIN rollover_event r
+        ON f.continuous_instrument_id = r.continuous_instrument_id
+       AND f.ts_recv = r.ts_recv
+    )
+    SELECT 
+      m.continuous_instrument_id AS instrument_id, 
+      m.ts_event, 
+      m.price, 
+      m.size, 
+      m.action, 
+      m.side, 
+      m.flags, 
+      m.ts_recv, 
+      m.ts_in_delta, 
+      m.sequence, 
+      m.discriminator,
+      m.rollover_flag,
+      b.bid_px, 
+      b.bid_sz, 
+      b.bid_ct, 
+      b.ask_px, 
+      b.ask_sz, 
+      b.ask_ct
+    FROM final_data m
+    LEFT JOIN futures_bid_ask b ON m.id = b.mbp_id AND b.depth = 0
+    WHERE m.ts_recv BETWEEN $1 AND $2
+    ORDER BY m.ts_recv
+"#;
+
+pub const FUTURES_CONTINUOUS_TRADE_QUERY: &str = r#"
+    WITH continuous_tickers AS (
+        SELECT *
+        FROM futures_continuous
+        WHERE ts_day BETWEEN $1 AND $2
+        AND continuous_ticker = ANY($3)
+    ),
+    filtered_mbp AS (
+      SELECT
+        ct.continuous_instrument_id,
+        mp.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY ct.continuous_ticker, ct.ts_day
+          ORDER BY mp.ts_recv
+        ) AS rn
+      FROM continuous_tickers ct
+      INNER JOIN futures_mbp mp
+        ON ct.instrument_id = mp.instrument_id
+        AND mp.ts_recv >= ct.ts_day
+        AND mp.ts_recv < ct.ts_day + 86400000000000
+        AND mp.action = 84
+    ),
+    rollovers AS (
+      SELECT
+        continuous_instrument_id,
+        ts_day
+      FROM futures_continuous
+      WHERE rollover_flag = 1
+      AND continuous_ticker = ANY($3)
+    ),
+    rollover_event AS (
+      SELECT DISTINCT ON (r.continuous_instrument_id, r.ts_day)
+        mp.*,
+        1 AS rollover_flag
+      FROM rollovers r
+      JOIN filtered_mbp mp
+      ON mp.continuous_instrument_id = r.continuous_instrument_id
+      AND mp.ts_recv >= r.ts_day
+      ORDER BY r.continuous_instrument_id, r.ts_day, mp.ts_recv
+    ),
+    final_data AS (
+      SELECT 
+         f.*,
+        COALESCE(r.rollover_flag, 0) AS rollover_flag
+      FROM filtered_mbp f
+      LEFT JOIN rollover_event r
+        ON f.continuous_instrument_id = r.continuous_instrument_id
+       AND f.ts_recv = r.ts_recv
+    )
+    SELECT 
+      m.continuous_instrument_id AS instrument_id, 
+      m.ts_event, 
+      m.price, 
+      m.size, 
+      m.action, 
+      m.side, 
+      m.flags, 
+      m.ts_recv, 
+      m.ts_in_delta, 
+      m.sequence, 
+      m.rollover_flag
+    FROM final_data m
+    WHERE m.ts_recv BETWEEN $1 AND $2
+    ORDER BY m.ts_recv
+"#;
+
+pub const FUTURES_CONTINUOUS_OHLCV_QUERY: &str = r#"
+    WITH continuous_tickers AS (
+        SELECT *
+        FROM futures_continuous
+        WHERE ts_day BETWEEN $1 AND $2
+        AND continuous_ticker = ANY($4)
+    ),
+    filtered_mbp AS (
+      SELECT
+        ct.continuous_instrument_id,
+        mp.ts_recv, 
+        mp.price, 
+        mp.size,
+        mp.instrument_id,
+        ROW_NUMBER() OVER (
+          PARTITION BY ct.continuous_instrument_id, floor(mp.ts_recv / $3) * $3
+          ORDER BY mp.ts_recv ASC,  mp.ctid ASC
+        ) AS first_row,
+        ROW_NUMBER() OVER (
+          PARTITION BY ct.continuous_instrument_id, floor(mp.ts_recv / $3) * $3
+          ORDER BY mp.ts_recv DESC, mp.ctid DESC
+        ) AS last_row
+      FROM continuous_tickers ct
+      INNER JOIN futures_mbp mp
+        ON ct.instrument_id = mp.instrument_id
+        AND mp.ts_recv >= ct.ts_day
+        AND mp.ts_recv < ct.ts_day + 86400000000000
+        AND mp.action = 84
+    ),
+    rollovers AS (
+      SELECT
+        continuous_instrument_id,
+        ts_day
+      FROM futures_continuous
+      WHERE rollover_flag = 1
+      AND continuous_ticker = ANY($4)
+    ),
+    rollover_event AS (
+      SELECT DISTINCT ON (r.continuous_instrument_id, r.ts_day)
+        mp.*,
+        1 AS rollover_flag
+      FROM rollovers r
+      JOIN filtered_mbp mp
+      ON mp.continuous_instrument_id = r.continuous_instrument_id
+      AND mp.ts_recv >= r.ts_day
+      ORDER BY r.continuous_instrument_id, r.ts_day, mp.ts_recv
+    ),
+    rollover_data AS (
+      SELECT 
+         f.*,
+        COALESCE(r.rollover_flag, 0) AS rollover_flag
+      FROM filtered_mbp f
+      LEFT JOIN rollover_event r
+        ON f.continuous_instrument_id = r.continuous_instrument_id
+       AND f.ts_recv = r.ts_recv
+    ),
+    final_data AS (
+      SELECT 
+        rd.continuous_instrument_id AS instrument_id,
+        CAST(floor(rd.ts_recv / $3) * $3 AS BIGINT) AS ts_event, -- Maintain nanoseconds
+        MAX(rd.rollover_flag) as rollover_flag,
+        MIN(rd.price) FILTER (WHERE rd.first_row = 1) AS open,
+        MIN(rd.price) FILTER (WHERE rd.last_row = 1) AS close,
+        MIN(rd.price) AS low,
+        MAX(rd.price) AS high,
+        SUM(rd.size) AS volume
+      FROM rollover_data rd
+    GROUP BY
+      rd.continuous_instrument_id,
+      floor(ts_recv / $3) * $3
+    )
+    SELECT * 
+    FROM final_data 
+    WHERE ts_event BETWEEN $1 AND ($2 - 1)
+    ORDER BY ts_event 
+"#;
+
+pub const FUTURES_CONTINUOUS_BBO_QUERY: &str = r#"
+    WITH continuous_tickers AS (
+        SELECT *
+        FROM futures_continuous
+        WHERE ts_day BETWEEN $1 AND $2
+        AND continuous_ticker = ANY($4)
+    ),
+    filtered_mbp AS (
+      SELECT
+        ct.continuous_instrument_id,   
+        mp.id,
+        mp.ts_recv,
+        mp.instrument_id,
+        FLOOR(mp.ts_recv / $3) * $3 AS ts_bucket,
+        ROW_NUMBER() OVER (
+          PARTITION BY mp.instrument_id, floor(mp.ts_recv / $3) * $3
+          ORDER BY mp.ts_recv DESC, mp.ctid DESC
+        ) AS last_row
+      FROM continuous_tickers ct
+      INNER JOIN futures_mbp mp
+        ON ct.instrument_id = mp.instrument_id
+        AND mp.ts_recv >= ct.ts_day
+        AND mp.ts_recv < ct.ts_day + 86400000000000
+    ),
+    rollovers AS (
+      SELECT
+        continuous_instrument_id,
+        ts_day
+      FROM futures_continuous
+      WHERE rollover_flag = 1
+      AND continuous_ticker = ANY($4)
+    ),
+    rollover_event AS (
+      SELECT DISTINCT ON (r.continuous_instrument_id, r.ts_day)
+        mp.*,
+        1 AS rollover_flag
+      FROM rollovers r
+      JOIN filtered_mbp mp
+      ON mp.continuous_instrument_id = r.continuous_instrument_id
+      AND mp.ts_recv >= r.ts_day
+      ORDER BY r.continuous_instrument_id, r.ts_day, mp.ts_recv
+    ),
+    rollover_data AS (
+      SELECT 
+         f.*,
+        COALESCE(r.rollover_flag, 0) AS rollover_flag
+      FROM filtered_mbp f
+      LEFT JOIN rollover_event r
+        ON f.continuous_instrument_id = r.continuous_instrument_id
+       AND f.ts_recv = r.ts_recv
+    ),
+    with_max_flag AS (
+        SELECT *,
+               MAX(rollover_flag) OVER (
+                   PARTITION BY continuous_instrument_id, ts_bucket
+               ) AS max_rollover_flag
+        FROM rollover_data
+    ),
+    final_data AS (
+      SELECT
+        w.id,
+        w.continuous_instrument_id AS instrument_id,
+        CAST(CEIL(w.ts_recv::double precision / $3) * $3 AS BIGINT) AS ts_event,
+        max_rollover_flag AS rollover_flag
+      FROM with_max_flag w
+      WHERE last_row = 1
+    )
+    SELECT 
+      f.instrument_id, 
+      f.ts_event,
+      f.rollover_flag,
+      b.bid_px, 
+      b.bid_sz, 
+      b.bid_ct, 
+      b.ask_px, 
+      b.ask_sz, 
+      b.ask_ct
+    FROM final_data f
+    LEFT JOIN futures_bid_ask b ON f.id = b.mbp_id AND b.depth = 0
+    WHERE ts_event BETWEEN $1 AND ($2 - 1)
+    ORDER BY ts_event
 "#;

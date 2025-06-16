@@ -275,6 +275,7 @@ mod test {
             1704672000000000000,
             1704672000000000000,
             0,
+            false,
             true,
         );
 
@@ -326,6 +327,7 @@ mod test {
             1704672000000000000,
             1704672000000000000,
             0,
+            false,
             true,
         );
         let result = create_instrument(Extension(state.clone()), Json(instrument))
@@ -421,6 +423,7 @@ mod test {
             1704672000000000000,
             1704672000000000000,
             0,
+            false,
             true,
         );
         let id = instrument
@@ -442,6 +445,7 @@ mod test {
             1704672000000000000,
             1704672000000000000,
             0,
+            false,
             true,
         );
 
@@ -508,6 +512,7 @@ mod test {
             1704672000000000000,
             1704672000000000000,
             0,
+            false,
             true,
         );
         let id = instrument
@@ -528,6 +533,7 @@ mod test {
             1704672000000000000,
             1704672000000000000,
             0,
+            false,
             true,
         );
         let id2 = instrument
@@ -609,6 +615,7 @@ mod test {
             1704672000000000000,
             1704672000000000000,
             0,
+            false,
             true,
         );
         let id = instrument
@@ -629,6 +636,7 @@ mod test {
             1704672000000000000,
             1704672000000000000,
             0,
+            false,
             true,
         );
         let id2 = instrument

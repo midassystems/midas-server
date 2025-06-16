@@ -36,6 +36,7 @@ impl FromRow for Instrument {
                 .try_get::<i64, _>("expiration_date")?
                 .try_into()
                 .unwrap(),
+            is_continuous: row.try_get::<bool, _>("is_continuous")?,
             active: row.try_get::<bool, _>("active")?,
         })
     }
@@ -70,8 +71,8 @@ impl InstrumentsQueries for Instrument {
 
         let query = format!(
             r#"
-            INSERT INTO {} (instrument_id, ticker, name, vendor, vendor_data,  last_available, first_available, expiration_date, active)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO {} (instrument_id, ticker, name, vendor, vendor_data,  last_available, first_available, expiration_date, is_continuous, active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING id
             "#,
             self.dataset.as_str()
@@ -86,8 +87,9 @@ impl InstrumentsQueries for Instrument {
             .bind(self.last_available as i64)
             .bind(self.first_available as i64)
             .bind(self.expiration_date as i64)
+            .bind(self.is_continuous)
             .bind(self.active)
-            .execute(tx.deref_mut()) // Borrow tx mutably
+            .execute(tx.deref_mut())
             .await?;
 
         info!("Successfully created instrument with id: {}", instrument_id);
@@ -160,8 +162,8 @@ impl InstrumentsQueries for Instrument {
         let query = format!(
             r#"
             UPDATE {}
-            SET ticker=$1, name=$2, vendor=$3, vendor_data=$4, last_available=$5, first_available=$6, expiration_date=$7, active=$8 
-            WHERE instrument_id = $9
+            SET ticker=$1, name=$2, vendor=$3, vendor_data=$4, last_available=$5, first_available=$6, expiration_date=$7,is_continuous=$8, active=$9 
+            WHERE instrument_id = $10
             "#,
             self.dataset.as_str()
         );
@@ -174,6 +176,7 @@ impl InstrumentsQueries for Instrument {
             .bind(self.last_available as i64)
             .bind(self.first_available as i64)
             .bind(self.expiration_date as i64)
+            .bind(self.is_continuous)
             .bind(self.active)
             .bind(id as i32)
             .execute(tx.deref_mut()) // Borrow tx mutably
@@ -339,6 +342,7 @@ mod test {
             1704672000000000000,
             1704672000000000000,
             0,
+            false,
             true,
         );
         let id = instrument
@@ -380,6 +384,7 @@ mod test {
             1704672000000000000,
             1704672000000000000,
             0,
+            false,
             true,
         );
 
@@ -423,6 +428,7 @@ mod test {
             1704672000000000000,
             1704672000000000000,
             0,
+            false,
             true,
         );
         let id = instrument
@@ -480,6 +486,7 @@ mod test {
             1704672000000000000,
             1704672000000000000,
             0,
+            false,
             true,
         );
 
@@ -539,6 +546,7 @@ mod test {
             1704672000000000000,
             1704672000000000000,
             0,
+            false,
             true,
         );
         let id = instrument
@@ -560,6 +568,7 @@ mod test {
             1704672000000000001,
             1704672000000000000,
             0,
+            false,
             true,
         );
         let mut transaction = pool.begin().await.expect("Error settign up database.");
