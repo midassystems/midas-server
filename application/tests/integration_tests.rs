@@ -422,6 +422,7 @@ async fn test_records_create() -> Result<()> {
         1704672000000000000,
         1704672000000000001,
         0,
+        false,
         true,
     );
     let id = create_instrument(instrument).await?;
@@ -555,6 +556,7 @@ async fn test_records_get() -> Result<()> {
         1704672000000000000,
         1704672000000000001,
         0,
+        false,
         true,
     );
     let id = create_instrument(instrument).await?;
@@ -715,6 +717,7 @@ async fn test_records_create_bulk() -> Result<()> {
         1704672000000000000,
         1704672000000000001,
         0,
+        false,
         true,
     );
     let id = create_instrument(instrument).await?;
@@ -855,6 +858,7 @@ async fn test_records_create_bulk_duplicate_error() -> Result<()> {
         1704672000000000000,
         1704672000000000001,
         0,
+        false,
         true,
     );
     let id = create_instrument(instrument).await?;
@@ -977,6 +981,7 @@ async fn test_instrument_create() -> anyhow::Result<()> {
         1704672000000000000,
         1704672000000000001,
         0,
+        false,
         true,
     );
     let json = json!(instrument);
@@ -1034,6 +1039,7 @@ async fn test_instrument_get() -> Result<()> {
         1704672000000000000,
         1704672000000000001,
         0,
+        false,
         true,
     );
     let json = json!(instrument);
@@ -1107,6 +1113,7 @@ async fn test_instrument_update() -> anyhow::Result<()> {
         1704672000000000000,
         1704672000000000001,
         0,
+        false,
         true,
     );
     let json = json!(instrument);
@@ -1135,6 +1142,7 @@ async fn test_instrument_update() -> anyhow::Result<()> {
         1704672000000000000,
         1704672000000000001,
         0,
+        false,
         true,
     );
 
@@ -1221,6 +1229,7 @@ async fn test_instrument_list_dataset() -> anyhow::Result<()> {
         1704672000000000000,
         1704672000000000001,
         0,
+        false,
         true,
     );
     let json = json!(instrument);
@@ -1248,6 +1257,7 @@ async fn test_instrument_list_dataset() -> anyhow::Result<()> {
         1704672000000000000,
         1704672000000000001,
         0,
+        false,
         true,
     );
     let json = json!(instrument2);
@@ -1320,6 +1330,7 @@ async fn test_vendor_list_instruments() -> anyhow::Result<()> {
         1704672000000000000,
         1704672000000000001,
         0,
+        false,
         true,
     );
     let json = json!(instrument);
@@ -1347,6 +1358,7 @@ async fn test_vendor_list_instruments() -> anyhow::Result<()> {
         1704672000000000000,
         1704672000000000001,
         0,
+        false,
         true,
     );
     let json = json!(instrument);

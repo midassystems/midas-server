@@ -346,8 +346,8 @@ mod test {
 
         let query = format!(
             r#"
-            INSERT INTO {} (instrument_id, ticker, name, vendor,vendor_data, last_available, first_available, active)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO {} (instrument_id, ticker, name, vendor,vendor_data, last_available, first_available, is_continuous, active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING id
             "#,
             instrument.dataset.as_str()
@@ -361,6 +361,7 @@ mod test {
             .bind(instrument.vendor_data as i64)
             .bind(instrument.last_available as i64)
             .bind(instrument.first_available as i64)
+            .bind(instrument.is_continuous)
             .bind(instrument.active)
             .execute(&mut *tx) // Borrow tx mutably
             .await?;
@@ -459,6 +460,7 @@ mod test {
             1704672000000000000,
             1704672000000000000,
             0,
+            false,
             true,
         );
 
@@ -562,6 +564,7 @@ mod test {
             1704672000000000000,
             1704672000000000000,
             0,
+            false,
             true,
         );
 
@@ -677,6 +680,7 @@ mod test {
             1704672000000000000,
             1704672000000000000,
             0,
+            false,
             true,
         );
 

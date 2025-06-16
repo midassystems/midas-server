@@ -1,6 +1,6 @@
-mod heap;
+// mod heap;
 mod mutex_cursor;
-mod query_task;
+// mod query_task;
 pub mod retriever;
 
 use crate::pool::DatabaseState;
@@ -87,8 +87,8 @@ mod test {
 
         let query = format!(
             r#"
-            INSERT INTO {} (instrument_id, ticker, name, vendor, vendor_data, last_available, first_available, expiration_date, active)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            INSERT INTO {} (instrument_id, ticker, name, vendor, vendor_data, last_available, first_available, expiration_date, is_continuous, active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING id
             "#,
             instrument.dataset.as_str()
@@ -103,6 +103,7 @@ mod test {
             .bind(instrument.last_available as i64)
             .bind(instrument.first_available as i64)
             .bind(instrument.expiration_date as i64)
+            .bind(instrument.is_continuous)
             .bind(instrument.active)
             .execute(&mut *tx) // Borrow tx mutably
             .await?;
@@ -160,6 +161,7 @@ mod test {
             1707937194000000000,
             1704067200000000000,
             1707937194000000000,
+            false,
             true,
         ));
 
@@ -173,6 +175,7 @@ mod test {
             1712941200000000000,
             1704067200000000000,
             1712941200000000000,
+            false,
             true,
         ));
 
@@ -186,6 +189,7 @@ mod test {
             1707937194000000000,
             1704067200000000000,
             1707937194000000000,
+            false,
             true,
         ));
 
@@ -199,6 +203,61 @@ mod test {
             1712941200000000000,
             1704067200000000000,
             1713326400000000000,
+            false,
+            true,
+        ));
+
+        instruments.push(Instrument::new(
+            None,
+            "LE.c.0",
+            "LeanHogs-c-0",
+            dataset,
+            Vendors::Internal,
+            0,
+            0,
+            0,
+            0,
+            true,
+            true,
+        ));
+        instruments.push(Instrument::new(
+            None,
+            "HE.c.0",
+            "LeanHogs-c-0",
+            dataset,
+            Vendors::Internal,
+            0,
+            0,
+            0,
+            0,
+            true,
+            true,
+        ));
+
+        instruments.push(Instrument::new(
+            None,
+            "LE.v.0",
+            "LeanHogs-v-0",
+            dataset,
+            Vendors::Internal,
+            0,
+            0,
+            0,
+            0,
+            true,
+            true,
+        ));
+        instruments.push(Instrument::new(
+            None,
+            "HE.v.0",
+            "LeanHogs-v-0",
+            dataset,
+            Vendors::Internal,
+            0,
+            0,
+            0,
+            0,
+            true,
             true,
         ));
 
@@ -370,12 +429,7 @@ mod test {
         }
 
         // Populare materialized views
-        let query = "REFRESH MATERIALIZED VIEW futures_continuous_calendar_windows";
-        sqlx::query(query)
-            .execute(state.historical_pool.deref())
-            .await?;
-
-        let query = "REFRESH MATERIALIZED VIEW futures_continuous_volume_windows";
+        let query = "REFRESH MATERIALIZED VIEW futures_continuous";
         sqlx::query(query)
             .execute(state.historical_pool.deref())
             .await?;
@@ -404,8 +458,8 @@ mod test {
         // Test
         let params = RetrieveParams {
             symbols: vec!["HE.c.0".to_string(), "LE.c.0".to_string()],
-            start_ts: 1704171600000000000,
-            end_ts: 1704209903644092569,
+            start_ts: 1703171600000000000,
+            end_ts: 1705225600000000000,
             schema: Schema::Mbp1,
             dataset: Dataset::Futures,
             stype: Stype::Continuous,
